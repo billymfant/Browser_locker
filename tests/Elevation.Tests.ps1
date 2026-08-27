@@ -18,6 +18,38 @@ Describe 'New-BraveLockerVaultRequest' {
     It 'rejects an unknown action' {
         { New-BraveLockerVaultRequest -Action 'Delete' -VhdxPath 'D:\v.vhdx' } | Should -Throw
     }
+
+    It 'carries no passphrase when none is supplied' {
+        $r = New-BraveLockerVaultRequest -Action 'Dismount' -VhdxPath 'D:\v.vhdx'
+        $r.ProtectedPassphrase | Should -Be ''
+    }
+
+    It 'carries the protected passphrase when one is supplied' {
+        $r = New-BraveLockerVaultRequest -Action 'Mount' -VhdxPath 'D:\v.vhdx' -ProtectedPassphrase 'ABC123'
+        $r.ProtectedPassphrase | Should -Be 'ABC123'
+    }
+
+    It 'never stores the passphrase in readable form' {
+        # DPAPI round-trip: what lands in the request file must not be the text.
+        $secure = ConvertTo-SecureString 'my-real-passphrase' -AsPlainText -Force
+        $protected = ConvertFrom-SecureString -SecureString $secure
+        $protected | Should -Not -Match 'my-real-passphrase'
+
+        $r = New-BraveLockerVaultRequest -Action 'Mount' -VhdxPath 'D:\v.vhdx' -ProtectedPassphrase $protected
+        ($r | ConvertTo-Json) | Should -Not -Match 'my-real-passphrase'
+    }
+
+    It 'round-trips back to the original passphrase for the task that must use it' {
+        $secure = ConvertTo-SecureString 'my-real-passphrase' -AsPlainText -Force
+        $protected = ConvertFrom-SecureString -SecureString $secure
+        $restored = ConvertTo-SecureString -String $protected
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($restored)
+        try {
+            [Runtime.InteropServices.Marshal]::PtrToStringUni($bstr) | Should -Be 'my-real-passphrase'
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        }
+    }
 }
 
 Describe 'Test-BraveLockerVaultResponse' {

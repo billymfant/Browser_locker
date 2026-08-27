@@ -73,8 +73,13 @@ software to install.
   every single launch. Instead, setup registers a scheduled task that runs with
   highest privileges as this user; the launcher triggers that task to do the
   mount and dismount. UAC is consented once, at install, not daily.
-- The task performs only mount and dismount. It never handles the password, which
-  is passed to BitLocker by the user's own unlock call.
+- The task performs mount, unlock and dismount. Unlocking BitLocker requires
+  elevation (verified on this machine: an unelevated unlock returns "Access
+  denied", not "wrong password"), so the passphrase must reach the task. It
+  travels DPAPI-protected under the current user, so no other account can read
+  it, and the request file is deleted the moment the task has read it.
+- On a wrong passphrase the task detaches the vault before returning, so a failed
+  attempt never leaves the profile attached.
 
 **4. Desktop shortcut** — "Brave (Private)", pointing at the launcher, using Brave's icon.
 

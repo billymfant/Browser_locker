@@ -65,7 +65,11 @@ if ($remaining -gt 0) {
 # --- Unlock -----------------------------------------------------------------
 $passphrase = Read-Host -Prompt 'Vault passphrase' -AsSecureString
 
-$mountResult = Invoke-BraveLockerMountTask -Action 'Mount' -VhdxPath $config.VhdxPath
+Write-Host 'Opening the vault...'
+# Unlocking BitLocker needs administrator rights, so the elevated task both
+# attaches and unlocks. The passphrase reaches it DPAPI-protected.
+$mountResult = Invoke-BraveLockerMountTask -Action 'Mount' -VhdxPath $config.VhdxPath -Passphrase $passphrase
+
 if (-not $mountResult.Success) {
     Write-Host "Could not open the vault: $($mountResult.Error)" -ForegroundColor Red
     Write-Host ''
@@ -75,19 +79,25 @@ if (-not $mountResult.Success) {
     return
 }
 
-$driveLetter = $mountResult.DriveLetter
-if (-not (Unlock-BraveLockerVault -DriveLetter $driveLetter -Passphrase $passphrase)) {
-    # Wrong passphrase: nothing was decrypted. Seal it back up, record the
-    # attempt, and lengthen the wait. Nothing is ever deleted.
+if (-not $mountResult.Unlocked) {
+    # Wrong passphrase: nothing was decrypted and the task has already detached
+    # the vault. Record the attempt and lengthen the wait. Nothing is deleted.
     $count = Add-BraveLockerFailedAttempt -StatePath $paths.StatePath -NowUtc (Get-Date).ToUniversalTime()
     Complete-BraveLockerSession -VhdxPath $config.VhdxPath | Out-Null
     $wait = Get-BraveLockerCooldownSeconds -FailureCount $count
+
     Write-Host ''
-    Write-Host "Incorrect passphrase. The vault stays sealed and nothing has been changed." -ForegroundColor Red
-    Write-Host "Wait $wait seconds before trying again." -ForegroundColor Red
+    if ($mountResult.Reason -eq 'WrongPassphrase') {
+        Write-Host 'Incorrect passphrase. The vault stays sealed and nothing has been changed.' -ForegroundColor Red
+        Write-Host "Wait $wait seconds before trying again." -ForegroundColor Red
+    } else {
+        Write-Host "The vault did not open - $($mountResult.Reason) $($mountResult.Error)" -ForegroundColor Red
+    }
     Read-Host 'Press Enter to close' | Out-Null
     return
 }
+
+$driveLetter = $mountResult.DriveLetter
 
 # --- Success ----------------------------------------------------------------
 $prior = Clear-BraveLockerFailedAttempts -StatePath $paths.StatePath

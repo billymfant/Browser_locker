@@ -9,7 +9,7 @@ has been seen — not assumed.
 | # | Check | How | Pass condition | Result |
 |---|-------|-----|----------------|--------|
 | 1 | `Get-DiskImage` works unelevated | `Get-DiskImage -ImagePath 'D:\apps\brave_locker\vault.vhdx'` in a normal shell | Returns the image, or "file not found" — **not** "access denied" | **PASS** — returned "cannot find the file", so no elevation needed |
-| 2 | `Unlock-BitLocker` works unelevated | After check 3, run the launcher as a normal user | Vault unlocks with no UAC prompt. If it demands elevation, apply the fallback below | pending |
+| 2 | `Unlock-BitLocker` works unelevated | After check 3, run the launcher as a normal user | Vault unlocks with no UAC prompt. If it demands elevation, apply the fallback below | **FAIL** - unelevated unlock returns "Access denied", not "wrong password". Fallback applied: the elevated task now performs the unlock, passphrase passed DPAPI-protected. |
 | 3 | Setup completes | Run `Install-BraveLocker.ps1` from an **elevated** shell | Recovery key displayed, profile copied, file counts match, desktop shortcut created | **PASS** - 12585 files in, 12585 in vault; task registered; shortcut created |
 | 4 | Vault is really encrypted | `manage-bde -status V:` while mounted | `Protection On`, `Percentage Encrypted: 100%` | pending |
 | 5 | Locked vault is unreadable | With Brave closed: `Get-ChildItem V:\` | Fails — drive not accessible | pending |

@@ -5,14 +5,17 @@ function New-BraveLockerVaultRequest {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][ValidateSet('Mount', 'Dismount')][string]$Action,
-        [Parameter(Mandatory)][string]$VhdxPath
+        [Parameter(Mandatory)][string]$VhdxPath,
+        # DPAPI-protected (CurrentUser scope), never the plain passphrase.
+        [string]$ProtectedPassphrase = ''
     )
 
     [pscustomobject]@{
-        RequestId  = [guid]::NewGuid().ToString()
-        Action     = $Action
-        VhdxPath   = $VhdxPath
-        CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        RequestId           = [guid]::NewGuid().ToString()
+        Action              = $Action
+        VhdxPath            = $VhdxPath
+        ProtectedPassphrase = $ProtectedPassphrase
+        CreatedUtc          = (Get-Date).ToUniversalTime().ToString('o')
     }
 }
 
@@ -117,6 +120,10 @@ function Invoke-BraveLockerMountTask {
     param(
         [Parameter(Mandatory)][ValidateSet('Mount', 'Dismount')][string]$Action,
         [Parameter(Mandatory)][string]$VhdxPath,
+        # Unlocking BitLocker requires elevation, so the passphrase has to reach
+        # the elevated task. It travels DPAPI-protected under the current user,
+        # and the task deletes the request file the moment it has read it.
+        [securestring]$Passphrase,
         [string]$TaskName = $script:BraveLockerTaskName,
         [int]$TimeoutSeconds = 60
     )
@@ -128,7 +135,12 @@ function Invoke-BraveLockerMountTask {
 
     Remove-Item -Path $paths.ResponsePath -Force -ErrorAction SilentlyContinue
 
-    $request = New-BraveLockerVaultRequest -Action $Action -VhdxPath $VhdxPath
+    $protected = ''
+    if ($PSBoundParameters.ContainsKey('Passphrase') -and $null -ne $Passphrase) {
+        $protected = ConvertFrom-SecureString -SecureString $Passphrase
+    }
+
+    $request = New-BraveLockerVaultRequest -Action $Action -VhdxPath $VhdxPath -ProtectedPassphrase $protected
     $request | ConvertTo-Json -Depth 5 | Set-Content -Path $paths.RequestPath -Encoding utf8
 
     Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
@@ -147,11 +159,15 @@ function Invoke-BraveLockerMountTask {
             if (Test-BraveLockerVaultResponse -Response $response -RequestId $request.RequestId) {
                 $success   = Get-BraveLockerPropertyValue -InputObject $response -Name 'Success'
                 $letter    = Get-BraveLockerPropertyValue -InputObject $response -Name 'DriveLetter'
+                $unlocked  = Get-BraveLockerPropertyValue -InputObject $response -Name 'Unlocked'
+                $reason    = Get-BraveLockerPropertyValue -InputObject $response -Name 'Reason'
                 $errorText = Get-BraveLockerPropertyValue -InputObject $response -Name 'Error'
 
                 return [pscustomobject]@{
                     Success     = [bool]$success
                     DriveLetter = [string]$letter
+                    Unlocked    = [bool]$unlocked
+                    Reason      = [string]$reason
                     Error       = [string]$errorText
                 }
             }
@@ -162,6 +178,8 @@ function Invoke-BraveLockerMountTask {
     [pscustomobject]@{
         Success     = $false
         DriveLetter = ''
+        Unlocked    = $false
+        Reason      = 'Timeout'
         Error       = "The vault task did not respond within $TimeoutSeconds seconds."
     }
 }
