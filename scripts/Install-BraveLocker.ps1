@@ -104,7 +104,9 @@ foreach ($sub in 'src', 'scripts') {
     Copy-Item -Path (Join-Path $repoRoot "$sub\*") -Destination $target -Recurse -Force
 }
 Set-BraveLockerScriptAcl -Path $InstallRoot
-Write-Host 'Installed copy is writable only by administrators.'
+# Set-BraveLockerScriptAcl throws unless it has read the ACL back and confirmed
+# it, so reaching this line means the permissions were actually verified.
+Write-Host 'Verified: the installed copy is writable only by administrators.'
 
 # --- 4. Create and encrypt the vault ---------------------------------------
 $letter = Get-BraveLockerFreeDriveLetter -Preferred 'V'

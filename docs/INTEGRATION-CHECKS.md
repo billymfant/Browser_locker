@@ -10,7 +10,7 @@ has been seen — not assumed.
 |---|-------|-----|----------------|--------|
 | 1 | `Get-DiskImage` works unelevated | `Get-DiskImage -ImagePath 'D:\apps\brave_locker\vault.vhdx'` in a normal shell | Returns the image, or "file not found" — **not** "access denied" | **PASS** — returned "cannot find the file", so no elevation needed |
 | 2 | `Unlock-BitLocker` works unelevated | After check 3, run the launcher as a normal user | Vault unlocks with no UAC prompt. If it demands elevation, apply the fallback below | pending |
-| 3 | Setup completes | Run `Install-BraveLocker.ps1` from an **elevated** shell | Recovery key displayed, profile copied, file counts match, desktop shortcut created | pending |
+| 3 | Setup completes | Run `Install-BraveLocker.ps1` from an **elevated** shell | Recovery key displayed, profile copied, file counts match, desktop shortcut created | **PASS** - 12585 files in, 12585 in vault; task registered; shortcut created |
 | 4 | Vault is really encrypted | `manage-bde -status V:` while mounted | `Protection On`, `Percentage Encrypted: 100%` | pending |
 | 5 | Locked vault is unreadable | With Brave closed: `Get-ChildItem V:\` | Fails — drive not accessible | pending |
 | 6 | No plaintext leaks into the vault file | `Select-String -Path vault.vhdx -Pattern 'facebook' -Encoding unicode` | No matches | pending |
@@ -22,7 +22,7 @@ has been seen — not assumed.
 | 12 | Crash recovery | `Stop-Process -Name brave -Force`, then relaunch | Launcher reports it sealed a vault left open, then proceeds normally | pending |
 | 13 | Work Brave is untouched | Open normal Brave; launch the private one; close the private one | The normal Brave keeps running throughout | pending |
 | 14 | No UAC on daily launch | Use the shortcut | No UAC prompt | pending |
-| 15 | Installed copy is hardened | `icacls "C:\Program Files\BraveLocker"` | `Users` have only `(RX)`; no `(F)`, `(M)` or `(W)` for Users, Authenticated Users or Everyone | pending |
+| 15 | Installed copy is hardened | `icacls "C:\Program Files\BraveLocker"` | `Users` have only `(RX)`; no `(F)`, `(M)` or `(W)` for Users, Authenticated Users or Everyone | **PASS** - verified after setup: Users:(OI)(CI)(RX), SYSTEM and Administrators (F) |
 
 Check 13 is the one that protects the working day: the launcher must never kill
 the work Brave. Check 6 is the one that proves the encryption is doing its job.

@@ -71,4 +71,21 @@ Describe 'Test-BraveLockerAclHardened' {
     It 'rejects an ACL granting Everyone full control' {
         Test-BraveLockerAclHardened -IcaclsOutput @('D:\x Everyone:(OI)(CI)(F)') | Should -BeFalse
     }
+
+    It 'tolerates the blank lines real icacls output contains' {
+        # icacls emits a blank line and a summary line; rejecting those made the
+        # verification throw during setup instead of verifying anything.
+        $out = @(
+            'C:\Program Files\BraveLocker BUILTIN\Users:(OI)(CI)(RX)'
+            '                             NT AUTHORITY\SYSTEM:(OI)(CI)(F)'
+            '                             BUILTIN\Administrators:(OI)(CI)(F)'
+            ''
+            'Successfully processed 1 files; Failed processing 0 files'
+        )
+        Test-BraveLockerAclHardened -IcaclsOutput $out | Should -BeTrue
+    }
+
+    It 'tolerates a null entry in the output' {
+        Test-BraveLockerAclHardened -IcaclsOutput @('D:\x BUILTIN\Users:(OI)(CI)(RX)', $null) | Should -BeTrue
+    }
 }

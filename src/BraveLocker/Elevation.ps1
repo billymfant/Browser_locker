@@ -44,11 +44,20 @@ function Test-BraveLockerAclHardened {
     #>
     [CmdletBinding()]
     [OutputType([bool])]
-    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$IcaclsOutput)
+    param(
+        # Real icacls output carries a blank line and a summary line, so empty
+        # and null entries have to be accepted and skipped, not rejected.
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
+        [AllowNull()]
+        [string[]]$IcaclsOutput
+    )
 
     $risky = 'Users', 'Authenticated Users', 'Everyone', 'INTERACTIVE'
 
     foreach ($line in $IcaclsOutput) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
         foreach ($principal in $risky) {
             if ($line -notmatch ([regex]::Escape($principal) + '\s*:')) { continue }
             # (F)ull, (M)odify and (W)rite each let a non-admin replace the script.
@@ -71,10 +80,11 @@ function Set-BraveLockerScriptAcl {
         throw ("Brave Locker: failed to harden '$Path'.`r`n" + ($output -join "`r`n"))
     }
 
-    $verify = & icacls.exe $Path 2>&1
-    if (-not (Test-BraveLockerAclHardened -IcaclsOutput @($verify | ForEach-Object { [string]$_ }))) {
+    $verify = @(& icacls.exe $Path 2>&1 | ForEach-Object { [string]$_ })
+    if (-not (Test-BraveLockerAclHardened -IcaclsOutput $verify)) {
         throw "Brave Locker: '$Path' is still writable by non-administrators after hardening. Refusing to continue, because the elevated task would be hijackable."
     }
+    Write-Verbose "Verified: '$Path' is writable only by administrators and SYSTEM."
 }
 
 function Register-BraveLockerMountTask {
