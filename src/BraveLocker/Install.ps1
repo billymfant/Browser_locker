@@ -42,3 +42,28 @@ function New-BraveLockerShortcut {
 
     $ShortcutPath
 }
+
+function Test-BraveLockerSafeToRemoveVault {
+    <#
+        Deleting the vault is only safe while the original, unencrypted profile
+        still exists. Once the cleanup script has removed it, the vault holds the
+        only copy of the user's logins and cards, and wiping it is permanent.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$SourceProfilePath,
+        [int]$MinimumFileCount = 100
+    )
+
+    if (-not (Test-Path $SourceProfilePath)) {
+        return [pscustomobject]@{ IsSafe = $false; Reason = 'OriginalProfileMissing'; FileCount = 0 }
+    }
+
+    $count = @(Get-ChildItem -Path $SourceProfilePath -Recurse -File -ErrorAction SilentlyContinue).Count
+    if ($count -lt $MinimumFileCount) {
+        return [pscustomobject]@{ IsSafe = $false; Reason = 'OriginalProfileEmpty'; FileCount = $count }
+    }
+
+    [pscustomobject]@{ IsSafe = $true; Reason = 'OriginalProfilePresent'; FileCount = $count }
+}
