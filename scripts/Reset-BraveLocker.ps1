@@ -39,10 +39,12 @@ if ($answer -ne 'START') {
 
 Write-Host ''
 Write-Host '--- Step 1 of 3: removing the old setup ---' -ForegroundColor Cyan
+# No $LASTEXITCODE check here: these are PowerShell scripts, not native
+# commands, so a failure surfaces as a terminating error under
+# $ErrorActionPreference = 'Stop' and stops this script on its own. Reading
+# $LASTEXITCODE before any native command has run is itself an error under
+# Set-StrictMode -Version Latest.
 & (Join-Path $here 'Uninstall-BraveLocker.ps1') -Force
-if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-    throw "Uninstall failed with exit code $LASTEXITCODE. Stopping before setup so nothing is left half-done."
-}
 
 Write-Host ''
 Write-Host '--- Step 2 of 3: fresh setup, new passphrase ---' -ForegroundColor Cyan
