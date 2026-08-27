@@ -71,6 +71,33 @@ function Test-BraveLockerVaultMounted {
     [bool]$image.Attached
 }
 
+function Get-BraveLockerPreferredAccessPath {
+    <#
+        Picks where the vault should be reached from. A folder mount point wins
+        over a drive letter, because a drive letter puts the vault in Explorer
+        for everyone to see. Volume GUID paths are never returned.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
+        [AllowNull()]
+        [string[]]$AccessPaths
+    )
+
+    $usable = @($AccessPaths | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^\\\\\?\\Volume'
+    })
+    if ($usable.Count -eq 0) { return '' }
+
+    $folder = $usable | Where-Object { $_ -notmatch '^[A-Za-z]:\\?$' } | Select-Object -First 1
+    if ($folder) { return ([string]$folder).TrimEnd('\') }
+
+    ([string]$usable[0]).TrimEnd('\')
+}
+
 function Mount-BraveLockerVault {
     [CmdletBinding()]
     [OutputType([string])]
@@ -84,31 +111,43 @@ function Mount-BraveLockerVault {
         Mount-DiskImage -ImagePath $VhdxPath -StorageType VHDX -ErrorAction Stop | Out-Null
     }
 
-    # The volume is still BitLocker-locked here: it has a drive letter, but its
+    # The volume is still BitLocker-locked here: it has a mount path, but its
     # contents stay unreadable until Unlock-BraveLockerVault succeeds.
-    $letter = Get-DiskImage -ImagePath $VhdxPath |
+    $partition = Get-DiskImage -ImagePath $VhdxPath |
         Get-Disk |
         Get-Partition -ErrorAction SilentlyContinue |
-        Where-Object { $_.DriveLetter } |
-        Select-Object -First 1 -ExpandProperty DriveLetter
+        Where-Object { $_.Type -ne 'Reserved' } |
+        Select-Object -First 1
 
-    if (-not $letter) {
-        throw 'Brave Locker: the vault attached but Windows gave it no drive letter.'
+    if ($null -eq $partition) {
+        throw 'Brave Locker: the vault attached but no usable partition was found.'
     }
-    [string]$letter
+
+    $mountPath = Get-BraveLockerPreferredAccessPath -AccessPaths $partition.AccessPaths
+    if (-not $mountPath) {
+        throw 'Brave Locker: the vault attached but Windows gave it nowhere to be reached from.'
+    }
+    $mountPath
 }
 
 function Unlock-BraveLockerVault {
     [CmdletBinding()]
     [OutputType([bool])]
     param(
-        [Parameter(Mandatory)][string]$DriveLetter,
+        # Either a drive letter ("V", "V:") or a folder mount point.
+        [Parameter(Mandatory)][Alias('DriveLetter')][string]$MountPoint,
         [Parameter(Mandatory)][securestring]$Passphrase
     )
 
-    $mount = $DriveLetter.TrimEnd(':').ToUpperInvariant() + ':'
+    $target = $MountPoint
+    if ($target -match '^[A-Za-z]:?$') {
+        $target = $target.TrimEnd(':').ToUpperInvariant() + ':'
+    } else {
+        $target = $target.TrimEnd('\')
+    }
+
     try {
-        Unlock-BitLocker -MountPoint $mount -Password $Passphrase -ErrorAction Stop | Out-Null
+        Unlock-BitLocker -MountPoint $target -Password $Passphrase -ErrorAction Stop | Out-Null
         return $true
     } catch {
         # A wrong passphrase is an expected outcome, not an exceptional one.

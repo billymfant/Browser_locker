@@ -158,17 +158,17 @@ function Invoke-BraveLockerMountTask {
 
             if (Test-BraveLockerVaultResponse -Response $response -RequestId $request.RequestId) {
                 $success   = Get-BraveLockerPropertyValue -InputObject $response -Name 'Success'
-                $letter    = Get-BraveLockerPropertyValue -InputObject $response -Name 'DriveLetter'
+                $mountPath = Get-BraveLockerPropertyValue -InputObject $response -Name 'MountPath'
                 $unlocked  = Get-BraveLockerPropertyValue -InputObject $response -Name 'Unlocked'
                 $reason    = Get-BraveLockerPropertyValue -InputObject $response -Name 'Reason'
                 $errorText = Get-BraveLockerPropertyValue -InputObject $response -Name 'Error'
 
                 return [pscustomobject]@{
-                    Success     = [bool]$success
-                    DriveLetter = [string]$letter
-                    Unlocked    = [bool]$unlocked
-                    Reason      = [string]$reason
-                    Error       = [string]$errorText
+                    Success   = [bool]$success
+                    MountPath = [string]$mountPath
+                    Unlocked  = [bool]$unlocked
+                    Reason    = [string]$reason
+                    Error     = [string]$errorText
                 }
             }
         }
@@ -176,10 +176,10 @@ function Invoke-BraveLockerMountTask {
     }
 
     [pscustomobject]@{
-        Success     = $false
-        DriveLetter = ''
-        Unlocked    = $false
-        Reason      = 'Timeout'
-        Error       = "The vault task did not respond within $TimeoutSeconds seconds."
+        Success   = $false
+        MountPath = ''
+        Unlocked  = $false
+        Reason    = 'Timeout'
+        Error     = "The vault task did not respond within $TimeoutSeconds seconds."
     }
 }

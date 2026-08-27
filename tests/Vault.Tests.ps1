@@ -31,3 +31,31 @@ Describe 'New-BraveLockerDiskpartScript' {
             Should -Throw -ExpectedMessage '*at least 1024*'
     }
 }
+
+Describe 'Get-BraveLockerPreferredAccessPath' {
+    It 'prefers a folder mount point over a drive letter' {
+        # A drive letter puts the vault in Explorer for anyone to notice.
+        Get-BraveLockerPreferredAccessPath -AccessPaths @('V:\', 'C:\ProgramData\BraveLocker\data\') |
+            Should -Be 'C:\ProgramData\BraveLocker\data'
+    }
+
+    It 'falls back to the drive letter when there is no folder' {
+        Get-BraveLockerPreferredAccessPath -AccessPaths @('V:\') | Should -Be 'V:'
+    }
+
+    It 'never returns a volume GUID path' {
+        Get-BraveLockerPreferredAccessPath -AccessPaths @('\\?\Volume{1234-5678}\', 'V:\') | Should -Be 'V:'
+    }
+
+    It 'returns empty when there is nowhere to mount' {
+        Get-BraveLockerPreferredAccessPath -AccessPaths @('\\?\Volume{1234-5678}\') | Should -Be ''
+    }
+
+    It 'returns empty for an empty list' {
+        Get-BraveLockerPreferredAccessPath -AccessPaths @() | Should -Be ''
+    }
+
+    It 'ignores blank entries' {
+        Get-BraveLockerPreferredAccessPath -AccessPaths @('', 'V:\') | Should -Be 'V:'
+    }
+}

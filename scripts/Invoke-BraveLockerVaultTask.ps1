@@ -20,7 +20,7 @@ $paths = Get-BraveLockerPaths
 $response = [pscustomobject]@{
     RequestId   = ''
     Success     = $false
-    DriveLetter = ''
+    MountPath   = ''
     Unlocked    = $false
     Reason      = ''
     Error       = ''
@@ -52,8 +52,8 @@ Remove-Item -Path $paths.RequestPath -Force -ErrorAction SilentlyContinue
 try {
     switch ($action) {
         'Mount' {
-            $letter = Mount-BraveLockerVault -VhdxPath $vhdxPath
-            $response.DriveLetter = $letter
+            $mountPath = Mount-BraveLockerVault -VhdxPath $vhdxPath
+            $response.MountPath = $mountPath
             $response.Success = $true
 
             if ([string]::IsNullOrWhiteSpace($protected)) {
@@ -68,11 +68,11 @@ try {
                 # Only the account that protected it can decrypt it.
                 $response.Reason = 'PassphraseUnreadable'
                 Dismount-BraveLockerVault -VhdxPath $vhdxPath
-                $response.DriveLetter = ''
+                $response.MountPath = ""
                 break
             }
 
-            if (Unlock-BraveLockerVault -DriveLetter $letter -Passphrase $secure) {
+            if (Unlock-BraveLockerVault -MountPoint $mountPath -Passphrase $secure) {
                 $response.Unlocked = $true
                 $response.Reason = 'Unlocked'
             } else {
@@ -80,7 +80,7 @@ try {
                 $response.Unlocked = $false
                 $response.Reason = 'WrongPassphrase'
                 Dismount-BraveLockerVault -VhdxPath $vhdxPath
-                $response.DriveLetter = ''
+                $response.MountPath = ""
             }
         }
         'Dismount' {

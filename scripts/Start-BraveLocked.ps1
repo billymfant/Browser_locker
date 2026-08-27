@@ -121,8 +121,7 @@ $($mountResult.Reason) $($mountResult.Error)
 # --- Success ----------------------------------------------------------------
 Clear-BraveLockerFailedAttempts -StatePath $paths.StatePath | Out-Null
 
-$driveLetter = $mountResult.DriveLetter
-$profilePath = Join-Path "${driveLetter}:" $config.ProfileDirName
+$profilePath = Join-Path $mountResult.MountPath $config.ProfileDirName
 
 try {
     Start-BraveLockerBrowser -BraveExe $config.BraveExe -ProfilePath $profilePath | Out-Null
