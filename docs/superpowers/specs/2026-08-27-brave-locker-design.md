@@ -52,8 +52,9 @@ software to install.
 **1. `Install-BraveLocker.ps1`** — one-time setup, runs elevated.
 - Creates a dynamically-expanding VHDX (32 GB max, ~1.2 GB actual to start).
 - Formats it NTFS, enables BitLocker with a user-chosen password.
-- Requires a passphrase of at least 16 characters and refuses anything shorter,
-  because the vault file can be attacked offline where no lockout applies.
+- Requires a passphrase of at least 8 characters, refuses anything shorter, and
+  warns when it is under 12, because the vault file can be attacked offline
+  where no lockout applies.
 - Displays the BitLocker recovery key and requires the user to confirm they have
   stored it **off this machine** (phone, password manager). It is deliberately not
   written to disk: a recovery key sitting on the PC defeats the whole vault.
@@ -151,7 +152,7 @@ Verified by running, not by assertion:
 - **Offline brute force is the real attack.** Anyone who copies `vault.vhdx` can grind
   at the password on their own machine, with no cooldown and no attempt limit. The
   on-screen policy cannot touch that. Passphrase length is the only defence, so setup
-  enforces a minimum of 16 characters and encourages a multi-word passphrase.
+  enforces a minimum of 8 characters, warns below 12, and encourages a multi-word passphrase.
 - **Password loss means data loss.** That is the point of encryption. The recovery key
   is the only backstop, and it lives off-machine.
 - **BitLocker password unlock on fixed data drives** can be disabled by group policy.

@@ -54,7 +54,9 @@ inspecting the disk offline all get them an encrypted blob.
   part of the tool, not an optional extra.
 - **Offline brute force on a weak passphrase.** Someone can copy `vault.vhdx` and
   attack it on their own machine, where the cooldown cannot reach them. Length is
-  the defence; setup enforces at least 16 characters.
+  the defence; setup enforces at least 8 characters and warns below 12. Under 12,
+  treat this as "stops someone opening Brave at my desk" rather than "holds up
+  against someone determined".
 - **Malware or keyloggers already running** on the account.
 - **Your screen.** It locks data at rest, not what is on the monitor.
 
@@ -82,7 +84,7 @@ That is what encryption means.
 ```
 src\BraveLocker\     the logic, unit-tested with Pester
 scripts\             setup, launcher, cleanup, and the elevated mount helper
-tests\               49 unit tests
+tests\               52 unit tests
 docs\                design spec, implementation plan, integration checks
 ```
 

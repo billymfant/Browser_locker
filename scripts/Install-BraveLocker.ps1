@@ -52,13 +52,13 @@ if (@(Get-Process -Name 'brave' -ErrorAction SilentlyContinue).Count -gt 0) {
 # --- 2. Passphrase ----------------------------------------------------------
 Write-Host 'Your passphrase is the only thing standing between someone with this PC'
 Write-Host 'and your accounts. Anyone who copies the vault file can attack it offline,'
-Write-Host 'where no lockout applies, so length matters far more than cleverness.'
+Write-Host 'where the lockout cannot reach them, so length matters more than cleverness.'
 Write-Host 'A few unrelated words you will actually remember beats a short cryptic one.'
 Write-Host ''
 
 $passphrase = $null
 while ($null -eq $passphrase) {
-    $first = Read-Host -Prompt 'Choose a vault passphrase (at least 16 characters)' -AsSecureString
+    $first = Read-Host -Prompt 'Choose a vault passphrase (at least 8 characters)' -AsSecureString
     $again = Read-Host -Prompt 'Type it again' -AsSecureString
 
     $plainFirst = Read-BraveLockerPlainText -Secure $first
@@ -72,12 +72,24 @@ while ($null -eq $passphrase) {
     $check = Test-BraveLockerPassphrase -Passphrase $plainFirst
     if (-not $check.IsValid) {
         if ($check.Reason -eq 'TooShort') {
-            Write-Host ('Too short - {0} characters. Use at least 16.' -f $plainFirst.Length) -ForegroundColor Yellow
+            Write-Host ('Too short - {0} characters. The minimum is 8.' -f $plainFirst.Length) -ForegroundColor Yellow
         } else {
-            Write-Host 'Padding with spaces does not count. Use at least 16 real characters.' -ForegroundColor Yellow
+            Write-Host 'Padding with spaces does not count. Use at least 8 real characters.' -ForegroundColor Yellow
         }
         continue
     }
+
+    if ($check.IsWeak) {
+        Write-Host ''
+        Write-Host ('{0} characters is usable but short.' -f $plainFirst.Length) -ForegroundColor Yellow
+        Write-Host 'It will stop someone opening Brave at your desk. It will not hold up if'
+        Write-Host 'someone copies the vault file and attacks it offline with cracking software.'
+        Write-Host 'Twelve or more closes that gap.' -ForegroundColor Yellow
+        Write-Host ''
+        $accept = Read-Host 'Use it anyway? (y/N)'
+        if ($accept -ne 'y') { continue }
+    }
+
     $passphrase = $first
 }
 Remove-Variable plainFirst, plainAgain -ErrorAction SilentlyContinue
