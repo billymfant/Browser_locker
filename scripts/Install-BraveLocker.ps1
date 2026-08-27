@@ -197,14 +197,7 @@ if (-not (Test-Path $paths.StateRoot)) {
 Lock-BitLocker -MountPoint $mount -ErrorAction SilentlyContinue | Out-Null
 Dismount-BraveLockerVault -VhdxPath $VhdxPath
 
-$shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Brave (Private).lnk'
-$shell = New-Object -ComObject WScript.Shell
-$link = $shell.CreateShortcut($shortcutPath)
-$link.TargetPath = 'powershell.exe'
-$link.Arguments = ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $InstallRoot 'scripts\Start-BraveLocked.ps1'))
-$link.IconLocation = $BraveExe
-$link.Description = 'Open Brave with the encrypted private profile.'
-$link.Save()
+New-BraveLockerShortcut -InstallRoot $InstallRoot -BraveExe $BraveExe -AlsoStartMenu | Out-Null
 
 Write-Host ''
 Write-Host 'Setup complete.' -ForegroundColor Green

@@ -44,5 +44,8 @@ Write-Host 'Verified: the installed copy is writable only by administrators.'
 Register-BraveLockerMountTask -ScriptPath (Join-Path $InstallRoot 'scripts\Invoke-BraveLockerVaultTask.ps1')
 Write-Host 'Mount task re-registered.'
 
+New-BraveLockerShortcut -InstallRoot $InstallRoot -BraveExe $config.BraveExe -AlsoStartMenu | Out-Null
+Write-Host 'Shortcut refreshed - desktop and Start menu, no console window.'
+
 Write-Host ''
 Write-Host 'Update complete. Your vault, profile and passphrase are unchanged.' -ForegroundColor Green

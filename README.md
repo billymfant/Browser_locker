@@ -23,7 +23,8 @@ cd D:\apps\brave_locker
 ```
 
 It will ask for a passphrase, show a recovery key once, copy your profile in,
-register the mount helper and put a **Brave (Private)** shortcut on your desktop.
+register the mount helper, and add a **Brave (Private)** shortcut to your desktop
+and Start menu.
 
 Then, and this part is not optional:
 
@@ -36,9 +37,11 @@ Then, and this part is not optional:
 
 ## Daily use
 
-Click **Brave (Private)**, type the passphrase, browse. Close Brave and the vault
-seals itself. Leave the small PowerShell window open while you browse — it is what
-seals the vault on exit.
+Click **Brave (Private)** - on the desktop or in the Start menu. A small popup asks
+for your passphrase, then Brave opens. Close Brave and the vault seals itself.
+
+There is no console window and nothing to leave open. The launcher runs invisibly
+in the background and exists only to seal the vault when you close Brave.
 
 ## What this protects against
 
@@ -84,7 +87,7 @@ That is what encryption means.
 ```
 src\BraveLocker\     the logic, unit-tested with Pester
 scripts\             setup, launcher, cleanup, and the elevated mount helper
-tests\               52 unit tests
+tests\               67 unit tests
 docs\                design spec, implementation plan, integration checks
 ```
 
