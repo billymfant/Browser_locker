@@ -121,3 +121,17 @@ Describe 'Test-BraveLockerAclHardened' {
         Test-BraveLockerAclHardened -IcaclsOutput @('D:\x BUILTIN\Users:(OI)(CI)(RX)', $null) | Should -BeTrue
     }
 }
+
+Describe 'vault requests carry the mount folder' {
+    It 'passes the folder the vault must be mounted onto' {
+        # The task mounts the vault at Brave's own profile path; without it the
+        # task has nowhere to put the volume.
+        $r = New-BraveLockerVaultRequest -Action 'Mount' -VhdxPath 'D:\v.vhdx' `
+            -MountPath 'C:\Users\U\AppData\Local\BraveSoftware\Brave-Browser\User Data'
+        $r.MountPath | Should -Be 'C:\Users\U\AppData\Local\BraveSoftware\Brave-Browser\User Data'
+    }
+
+    It 'defaults to an empty mount folder when none is given' {
+        (New-BraveLockerVaultRequest -Action 'Dismount' -VhdxPath 'D:\v.vhdx').MountPath | Should -Be ''
+    }
+}

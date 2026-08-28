@@ -6,6 +6,8 @@ function New-BraveLockerVaultRequest {
     param(
         [Parameter(Mandatory)][ValidateSet('Mount', 'Dismount')][string]$Action,
         [Parameter(Mandatory)][string]$VhdxPath,
+        # The folder the vault is mounted onto - Brave's own profile path.
+        [string]$MountPath = '',
         # DPAPI-protected (CurrentUser scope), never the plain passphrase.
         [string]$ProtectedPassphrase = ''
     )
@@ -14,6 +16,7 @@ function New-BraveLockerVaultRequest {
         RequestId           = [guid]::NewGuid().ToString()
         Action              = $Action
         VhdxPath            = $VhdxPath
+        MountPath           = $MountPath
         ProtectedPassphrase = $ProtectedPassphrase
         CreatedUtc          = (Get-Date).ToUniversalTime().ToString('o')
     }
@@ -120,6 +123,8 @@ function Invoke-BraveLockerMountTask {
     param(
         [Parameter(Mandatory)][ValidateSet('Mount', 'Dismount')][string]$Action,
         [Parameter(Mandatory)][string]$VhdxPath,
+        # Brave's own profile folder - where the vault gets mounted.
+        [string]$MountPath = '',
         # Unlocking BitLocker requires elevation, so the passphrase has to reach
         # the elevated task. It travels DPAPI-protected under the current user,
         # and the task deletes the request file the moment it has read it.
@@ -140,7 +145,8 @@ function Invoke-BraveLockerMountTask {
         $protected = ConvertFrom-SecureString -SecureString $Passphrase
     }
 
-    $request = New-BraveLockerVaultRequest -Action $Action -VhdxPath $VhdxPath -ProtectedPassphrase $protected
+    $request = New-BraveLockerVaultRequest -Action $Action -VhdxPath $VhdxPath `
+        -MountPath $MountPath -ProtectedPassphrase $protected
     $request | ConvertTo-Json -Depth 5 | Set-Content -Path $paths.RequestPath -Encoding utf8
 
     Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop

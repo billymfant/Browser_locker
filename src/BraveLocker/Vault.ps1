@@ -113,11 +113,7 @@ function Mount-BraveLockerVault {
 
     # The volume is still BitLocker-locked here: it has a mount path, but its
     # contents stay unreadable until Unlock-BraveLockerVault succeeds.
-    $partition = Get-DiskImage -ImagePath $VhdxPath |
-        Get-Disk |
-        Get-Partition -ErrorAction SilentlyContinue |
-        Where-Object { $_.Type -ne 'Reserved' } |
-        Select-Object -First 1
+    $partition = Get-BraveLockerVaultPartition -VhdxPath $VhdxPath
 
     if ($null -eq $partition) {
         throw 'Brave Locker: the vault attached but no usable partition was found.'
@@ -162,4 +158,122 @@ function Dismount-BraveLockerVault {
 
     if (-not (Test-BraveLockerVaultMounted -VhdxPath $VhdxPath)) { return }
     Dismount-DiskImage -ImagePath $VhdxPath -ErrorAction Stop | Out-Null
+}
+
+function Get-BraveLockerVaultPartition {
+    <#
+        The vault's data partition. Reserved partitions are skipped: a GPT disk
+        carries a Microsoft Reserved partition that holds no filesystem.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$VhdxPath)
+
+    Get-DiskImage -ImagePath $VhdxPath |
+        Get-Disk |
+        Get-Partition -ErrorAction SilentlyContinue |
+        Where-Object { $_.Type -ne 'Reserved' } |
+        Select-Object -First 1
+}
+
+function Get-BraveLockerPartitionDriveLetter {
+    <#
+        A partition with no drive letter reports it as NUL rather than null or
+        an empty string, which reads as a one-character letter unless it is
+        checked for. Returns '' when there is genuinely no letter.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][AllowNull()]$Partition)
+
+    if ($null -eq $Partition) { return '' }
+
+    $letter = [string](Get-BraveLockerPropertyValue -InputObject $Partition -Name 'DriveLetter')
+    if ([string]::IsNullOrWhiteSpace($letter) -or $letter -eq "`0") { return '' }
+    $letter.ToUpperInvariant()
+}
+
+function Add-BraveLockerVaultDriveLetter {
+    <#
+        Gives the vault a drive letter, returning the letter used.
+
+        The vault is always unlocked through a drive letter and only then moved
+        onto its folder. That order is what was verified on this machine: unlock
+        via V:, add the folder access path, drop the letter, and the contents
+        stay readable through the folder.
+
+        Whether BitLocker can unlock through a folder mount point directly was
+        never established - the one attempt that appeared to prove it could not
+        was in fact failing authentication for an unrelated reason. Unlocking
+        through a letter works, so there is no reason to find out.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$VhdxPath)
+
+    $partition = Get-BraveLockerVaultPartition -VhdxPath $VhdxPath
+    if ($null -eq $partition) {
+        throw 'Brave Locker: the vault has no usable partition to assign a letter to.'
+    }
+
+    $existing = Get-BraveLockerPartitionDriveLetter -Partition $partition
+    if ($existing) { return $existing }
+
+    $letter = Get-BraveLockerFreeDriveLetter -Preferred 'V'
+    Add-PartitionAccessPath -DiskNumber $partition.DiskNumber `
+        -PartitionNumber $partition.PartitionNumber -AccessPath "${letter}:" -ErrorAction Stop
+    $letter
+}
+
+function Remove-BraveLockerVaultDriveLetter {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$VhdxPath,
+        [Parameter(Mandatory)][string]$DriveLetter
+    )
+
+    $partition = Get-BraveLockerVaultPartition -VhdxPath $VhdxPath
+    if ($null -eq $partition) { return }
+
+    $letter = $DriveLetter.TrimEnd(':', '\').ToUpperInvariant()
+    Remove-PartitionAccessPath -DiskNumber $partition.DiskNumber `
+        -PartitionNumber $partition.PartitionNumber -AccessPath "${letter}:\" -ErrorAction Stop
+}
+
+function Set-BraveLockerVaultAccessPath {
+    <#
+        Mounts the unlocked vault onto a folder. The folder must exist and be
+        empty - Windows refuses to mount a volume over anything else, and that
+        refusal is what stops a stray profile being silently shadowed.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$VhdxPath,
+        [Parameter(Mandatory)][string]$AccessPath
+    )
+
+    $partition = Get-BraveLockerVaultPartition -VhdxPath $VhdxPath
+    if ($null -eq $partition) {
+        throw 'Brave Locker: the vault has no usable partition to mount.'
+    }
+
+    if (-not (Test-Path $AccessPath)) {
+        New-Item -ItemType Directory -Path $AccessPath -Force | Out-Null
+    }
+
+    Add-PartitionAccessPath -DiskNumber $partition.DiskNumber `
+        -PartitionNumber $partition.PartitionNumber -AccessPath $AccessPath -ErrorAction Stop
+}
+
+function Remove-BraveLockerVaultAccessPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$VhdxPath,
+        [Parameter(Mandatory)][string]$AccessPath
+    )
+
+    $partition = Get-BraveLockerVaultPartition -VhdxPath $VhdxPath
+    if ($null -eq $partition) { return }
+
+    Remove-PartitionAccessPath -DiskNumber $partition.DiskNumber `
+        -PartitionNumber $partition.PartitionNumber -AccessPath $AccessPath -ErrorAction SilentlyContinue
 }

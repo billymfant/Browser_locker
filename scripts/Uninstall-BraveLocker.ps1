@@ -34,7 +34,21 @@ $sourceProfile = Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User D
 if ($config) {
     $vhdxPath = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'VhdxPath')
     $braveExe = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'BraveExe')
-    $sourceProfile = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'SourceProfilePath')
+
+    # PreMigrationPath is the current layout. SourceProfilePath is what earlier
+    # versions wrote, when the profile was copied elsewhere rather than the
+    # vault being mounted over it - an install from then must still uninstall.
+    foreach ($name in 'PreMigrationPath', 'SourceProfilePath') {
+        $candidate = [string](Get-BraveLockerPropertyValue -InputObject $config -Name $name)
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            $sourceProfile = $candidate
+            break
+        }
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($sourceProfile)) {
+    $sourceProfile = Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User Data'
 }
 
 Write-Host ''
@@ -137,7 +151,41 @@ if ($vhdxPath -and (Test-Path $vhdxPath)) {
     Write-Host "  deleted $vhdxPath"
 }
 
-# --- 5. Folders -------------------------------------------------------------
+# --- 5. Put Brave's profile folder back ------------------------------------
+# Setup renamed the original aside and mounted the vault in its place. With the
+# vault detached, that leaves an empty folder where Brave expects its profile.
+$profileMountPath = ''
+if ($config) {
+    $profileMountPath = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'ProfileMountPath')
+}
+
+if ($profileMountPath -and $sourceProfile -and (Test-Path $sourceProfile)) {
+    if (Test-Path $profileMountPath) {
+        $leftover = @(Get-ChildItem -Path $profileMountPath -Force -ErrorAction SilentlyContinue)
+        if ($leftover.Count -eq 0) {
+            Remove-Item -Path $profileMountPath -Force -ErrorAction SilentlyContinue
+        } else {
+            # Something browsed here without the locker. Keep it - it is a real
+            # profile - and let the rename below fail loudly rather than merge.
+            $stray = "$profileMountPath.stray-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
+            Rename-Item -Path $profileMountPath -NewName (Split-Path -Leaf $stray) -ErrorAction SilentlyContinue
+            Write-Host "  a profile was left at the mount folder; kept as $stray" -ForegroundColor Yellow
+        }
+    }
+
+    if (-not (Test-Path $profileMountPath)) {
+        Rename-Item -Path $sourceProfile -NewName (Split-Path -Leaf $profileMountPath) -ErrorAction Stop
+        Write-Host "  restored your original Brave profile to $profileMountPath"
+    } else {
+        Write-Host "  could NOT restore the profile - '$profileMountPath' is still in the way" -ForegroundColor Yellow
+        Write-Host "  your profile is safe at $sourceProfile - rename it back by hand" -ForegroundColor Yellow
+    }
+}
+
+# --- 6. Folders -------------------------------------------------------------
+# $MountFolder is the legacy hidden-mount location from an earlier version. The
+# profile mount folder is NEVER listed here - deleting it would take Brave's
+# profile with it.
 foreach ($folder in @($InstallRoot, $MountFolder, $paths.StateRoot)) {
     if ($folder -and (Test-Path $folder)) {
         Remove-Item -Path $folder -Recurse -Force -ErrorAction SilentlyContinue

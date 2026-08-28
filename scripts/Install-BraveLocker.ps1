@@ -1,8 +1,15 @@
 #Requires -Version 5.1
 #Requires -RunAsAdministrator
 <#
-    One-time setup. Creates the encrypted vault, moves the Brave profile into it,
-    installs a protected copy of the tool, and registers the elevated mount helper.
+    One-time setup. Creates the encrypted vault, moves the Brave profile into
+    it, installs a protected copy of the tool, and registers the elevated mount
+    helper.
+
+    The vault is mounted onto Brave's OWN profile folder rather than the profile
+    being copied somewhere else. That is not a stylistic choice. Brave's
+    App-Bound Encryption ties cookies and saved passwords to the profile path,
+    so a profile opened from any other path decrypts nothing and every account
+    appears logged out. Keeping the path identical is the whole trick.
 
     The installed copy lives under Program Files because the scheduled task runs
     its script with administrator rights: if a non-administrator could write to
@@ -14,7 +21,7 @@ param(
     [string]$VhdxPath = 'D:\apps\brave_locker\vault.vhdx',
     [int]$MaximumSizeMB = 32768,
     [string]$BraveExe = 'C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe',
-    [string]$SourceProfilePath = (Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User Data'),
+    [string]$ProfileMountPath = (Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User Data'),
     [string]$InstallRoot = 'C:\Program Files\BraveLocker'
 )
 
@@ -23,6 +30,8 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $repoRoot 'src\BraveLocker\BraveLocker.psd1') -Force
+
+$preMigrationPath = "$ProfileMountPath.premigration"
 
 function Read-BraveLockerPlainText {
     param([Parameter(Mandatory)][securestring]$Secure)
@@ -41,25 +50,38 @@ Write-Host '=================='
 Write-Host ''
 
 # --- 1. Preconditions -------------------------------------------------------
-if (-not (Test-Path $BraveExe))          { throw "Brave was not found at '$BraveExe'." }
-if (-not (Test-Path $SourceProfilePath)) { throw "No Brave profile found at '$SourceProfilePath'." }
-if (Test-Path $VhdxPath)                 { throw "A vault already exists at '$VhdxPath'. Delete it first if you truly want to start over." }
+if (-not (Test-Path $BraveExe))         { throw "Brave was not found at '$BraveExe'." }
+if (-not (Test-Path $ProfileMountPath)) { throw "No Brave profile found at '$ProfileMountPath'." }
+if (Test-Path $VhdxPath)                { throw "A vault already exists at '$VhdxPath'. Delete it first if you truly want to start over." }
+if (Test-Path $preMigrationPath)        { throw "'$preMigrationPath' already exists. A previous setup left it behind - move it out of the way first." }
 
 if (@(Get-Process -Name 'brave' -ErrorAction SilentlyContinue).Count -gt 0) {
     throw 'Close Brave completely before running setup, so the profile is copied in a consistent state.'
 }
 
 # --- 2. Passphrase ----------------------------------------------------------
+# Asked through the same popup the launcher uses, never through this console.
+# A console window can be on a different keyboard layout than a dialog, so the
+# same keys produce different characters - which silently sets a passphrase the
+# popup can never reproduce. That happened on this machine.
 Write-Host 'Your passphrase is the only thing standing between someone with this PC'
 Write-Host 'and your accounts. Anyone who copies the vault file can attack it offline,'
 Write-Host 'where the lockout cannot reach them, so length matters more than cleverness.'
 Write-Host 'A few unrelated words you will actually remember beats a short cryptic one.'
 Write-Host ''
+Write-Host 'A popup will ask for it - type it THERE, not in this window.' -ForegroundColor Yellow
+Write-Host ''
 
 $passphrase = $null
 while ($null -eq $passphrase) {
-    $first = Read-Host -Prompt 'Choose a vault passphrase (at least 8 characters)' -AsSecureString
-    $again = Read-Host -Prompt 'Type it again' -AsSecureString
+    $first = Show-BraveLockerPassphrasePrompt -Title 'Brave Locker setup' `
+        -Prompt 'Choose a vault passphrase (at least 8 characters)' `
+        -Note 'A few unrelated words beats a short cryptic one.'
+    if ($null -eq $first) { throw 'Setup cancelled. Nothing was changed.' }
+
+    $again = Show-BraveLockerPassphrasePrompt -Title 'Brave Locker setup' `
+        -Prompt 'Type it again to confirm'
+    if ($null -eq $again) { throw 'Setup cancelled. Nothing was changed.' }
 
     $plainFirst = Read-BraveLockerPlainText -Secure $first
     $plainAgain = Read-BraveLockerPlainText -Secure $again
@@ -90,6 +112,7 @@ while ($null -eq $passphrase) {
         if ($accept -ne 'y') { continue }
     }
 
+    Write-Host ('Passphrase accepted ({0} characters).' -f $plainFirst.Length) -ForegroundColor Green
     $passphrase = $first
 }
 Remove-Variable plainFirst, plainAgain -ErrorAction SilentlyContinue
@@ -113,7 +136,7 @@ $letter = Get-BraveLockerFreeDriveLetter -Preferred 'V'
 $mount = "${letter}:"
 
 Write-Host ''
-Write-Host "Creating the vault at $VhdxPath (drive $mount) ..."
+Write-Host "Creating the vault at $VhdxPath (temporarily on $mount) ..."
 New-BraveLockerVault -VhdxPath $VhdxPath -MaximumSizeMB $MaximumSizeMB -DriveLetter $letter
 
 Write-Host 'Encrypting it with BitLocker. This is quick because the vault is still empty.'
@@ -141,43 +164,57 @@ Write-Host ''
 Write-Host 'This is deliberately not saved anywhere on this PC. A recovery key sitting'
 Write-Host 'on the machine would let anyone who finds it open the vault, which defeats'
 Write-Host 'the whole point. Put it on your phone or in a password manager.'
+Write-Host 'Do not paste it into a chat window either - it opens the vault on its own,'
+Write-Host 'without your passphrase.'
 Write-Host 'If you lose both the passphrase and this key, the profile is gone for good.'
 Write-Host ''
 
 $confirm = Read-Host 'Type STORED once you have saved it somewhere off this PC'
 if ($confirm -ne 'STORED') {
+    Lock-BitLocker -MountPoint $mount -ErrorAction SilentlyContinue | Out-Null
     Dismount-BraveLockerVault -VhdxPath $VhdxPath
     Remove-Item -Path $VhdxPath -Force -ErrorAction SilentlyContinue
     throw 'Setup cancelled and the vault deleted, because the recovery key was not stored. Your Brave profile was not touched.'
 }
 Clear-Variable recoveryKey
 
-# --- 6. Migrate the profile -------------------------------------------------
-$profilePath = Join-Path $mount 'BraveProfile'
+# --- 6. Copy the profile to the VAULT ROOT ---------------------------------
+# Root, not a subfolder: the vault gets mounted onto Brave's profile folder, so
+# the volume root has to BE that folder's contents.
 Write-Host ''
 Write-Host 'Copying your Brave profile into the vault. Around 1.2 GB, so give it a minute.'
-New-Item -ItemType Directory -Path $profilePath -Force | Out-Null
 
-& robocopy.exe $SourceProfilePath $profilePath /E /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+& robocopy.exe $ProfileMountPath "$mount\" /E /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
 $robocopyExit = $LASTEXITCODE
 if ($robocopyExit -ge 8) {
     throw "robocopy reported errors (exit $robocopyExit). The vault is left in place for inspection; your original profile is untouched."
 }
 
-$sourceCount = @(Get-ChildItem -Path $SourceProfilePath -Recurse -File -ErrorAction SilentlyContinue).Count
-$vaultCount  = @(Get-ChildItem -Path $profilePath -Recurse -File -ErrorAction SilentlyContinue).Count
+$sourceCount = @(Get-ChildItem -Path $ProfileMountPath -Recurse -File -ErrorAction SilentlyContinue).Count
+# System Volume Information belongs to the volume, not to Brave, so it is not
+# part of the comparison.
+$vaultCount = @(Get-ChildItem -Path "$mount\" -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch '\\System Volume Information\\' }).Count
 Write-Host "Verification: $sourceCount files in the original, $vaultCount in the vault."
 
-$migrationClean = $true
 if ($vaultCount -lt $sourceCount) {
-    $migrationClean = $false
-    Write-Host 'Fewer files arrived than were sent. Your original profile is untouched - do NOT run the cleanup script until this is understood.' -ForegroundColor Yellow
+    Lock-BitLocker -MountPoint $mount -ErrorAction SilentlyContinue | Out-Null
+    Dismount-BraveLockerVault -VhdxPath $VhdxPath
+    Remove-Item -Path $VhdxPath -Force -ErrorAction SilentlyContinue
+    throw "Only $vaultCount of $sourceCount files arrived in the vault. Setup stopped and the vault deleted. Your original profile is untouched."
 }
 
-# --- 7. Register the elevated helper ---------------------------------------
-$installedTaskScript = Join-Path $InstallRoot 'scripts\Invoke-BraveLockerVaultTask.ps1'
-Register-BraveLockerMountTask -ScriptPath $installedTaskScript
-Write-Host 'Registered the mount helper, so launching Brave will not prompt for UAC.'
+Lock-BitLocker -MountPoint $mount -ErrorAction SilentlyContinue | Out-Null
+Dismount-BraveLockerVault -VhdxPath $VhdxPath
+
+# --- 7. Put the vault where Brave looks ------------------------------------
+# The original is RENAMED, never deleted. It stays as the rollback until the
+# user has confirmed the vaulted Brave really does have their logins.
+Write-Host ''
+Write-Host 'Moving your original profile aside (renamed, not deleted)...'
+Rename-Item -Path $ProfileMountPath -NewName (Split-Path -Leaf $preMigrationPath) -ErrorAction Stop
+New-Item -ItemType Directory -Path $ProfileMountPath -Force | Out-Null
+Write-Host "  original kept at: $preMigrationPath"
 
 # --- 8. Save config ---------------------------------------------------------
 $paths = Get-BraveLockerPaths
@@ -185,31 +222,55 @@ if (-not (Test-Path $paths.StateRoot)) {
     New-Item -ItemType Directory -Path $paths.StateRoot -Force | Out-Null
 }
 [pscustomobject]@{
-    VhdxPath             = $VhdxPath
-    ProfileDirName       = 'BraveProfile'
-    BraveExe             = $BraveExe
-    PreferredDriveLetter = $letter
-    SourceProfilePath    = $SourceProfilePath
-    InstallRoot          = $InstallRoot
+    VhdxPath         = $VhdxPath
+    ProfileMountPath = $ProfileMountPath
+    PreMigrationPath = $preMigrationPath
+    BraveExe         = $BraveExe
+    InstallRoot      = $InstallRoot
 } | ConvertTo-Json -Depth 5 | Set-Content -Path $paths.ConfigPath -Encoding utf8
 
-# --- 9. Seal up and create the shortcut ------------------------------------
-Lock-BitLocker -MountPoint $mount -ErrorAction SilentlyContinue | Out-Null
+# --- 9. Register the elevated helper ---------------------------------------
+$installedTaskScript = Join-Path $InstallRoot 'scripts\Invoke-BraveLockerVaultTask.ps1'
+Register-BraveLockerMountTask -ScriptPath $installedTaskScript
+Write-Host 'Registered the mount helper, so launching Brave will not prompt for UAC.'
+
+# --- 10. Prove the mount works before claiming success ---------------------
+Write-Host ''
+Write-Host 'Checking the vault really does mount onto Brave''s profile folder...'
+Mount-DiskImage -ImagePath $VhdxPath -StorageType VHDX -ErrorAction Stop | Out-Null
+$tempLetter = Add-BraveLockerVaultDriveLetter -VhdxPath $VhdxPath
+
+if (-not (Unlock-BraveLockerVault -MountPoint $tempLetter -Passphrase $passphrase)) {
+    Dismount-BraveLockerVault -VhdxPath $VhdxPath
+    throw 'The vault would not unlock with the passphrase just set. Setup stopped; your original profile is at ' + $preMigrationPath
+}
+
+Set-BraveLockerVaultAccessPath -VhdxPath $VhdxPath -AccessPath $ProfileMountPath
+Remove-BraveLockerVaultDriveLetter -VhdxPath $VhdxPath -DriveLetter $tempLetter
+
+$localState = Join-Path $ProfileMountPath 'Local State'
+$mountVerified = Test-Path $localState
+
+Remove-BraveLockerVaultAccessPath -VhdxPath $VhdxPath -AccessPath $ProfileMountPath
 Dismount-BraveLockerVault -VhdxPath $VhdxPath
 
+if (-not $mountVerified) {
+    throw "The vault mounted but 'Local State' was not visible at $ProfileMountPath. Your original profile is at $preMigrationPath"
+}
+Write-Host '  verified: the vault mounts at Brave''s own profile path.' -ForegroundColor Green
+
+# --- 11. Shortcut -----------------------------------------------------------
 New-BraveLockerShortcut -InstallRoot $InstallRoot -BraveExe $BraveExe -AlsoStartMenu | Out-Null
 
 Write-Host ''
 Write-Host 'Setup complete.' -ForegroundColor Green
 Write-Host ''
 Write-Host 'Next, and this part matters:' -ForegroundColor Yellow
-Write-Host '  1. Open "Brave (Private)" on your desktop.'
+Write-Host '  1. Open Brave and enter your passphrase.'
 Write-Host '  2. Check Facebook, your email and brave://settings/payments for your cards.'
-if ($migrationClean) {
-    Write-Host '  3. Once satisfied, run Complete-BraveLockerMigration.ps1.'
-} else {
-    Write-Host '  3. The file counts did not match - work out why before running the cleanup script.' -ForegroundColor Yellow
-}
+Write-Host '     Your logins should ALL still be there. If they are not, stop and say so.'
+Write-Host '  3. Once satisfied, run Complete-BraveLockerMigration.ps1.'
 Write-Host ''
-Write-Host 'Until step 3 is done, your ORIGINAL unprotected profile is still on disk' -ForegroundColor Yellow
-Write-Host 'and this tool is protecting nothing.' -ForegroundColor Yellow
+Write-Host 'Until step 3 is done, your ORIGINAL unprotected profile is still on disk at' -ForegroundColor Yellow
+Write-Host "  $preMigrationPath" -ForegroundColor Yellow
+Write-Host 'and this tool is protecting nothing. That copy is also your rollback.' -ForegroundColor Yellow

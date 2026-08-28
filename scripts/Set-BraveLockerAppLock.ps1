@@ -1,20 +1,17 @@
 #Requires -Version 5.1
 #Requires -RunAsAdministrator
 <#
-    Turns Brave Locker from "a separate private browser" into "a lock on Brave".
+    Puts the lock on Brave itself: your real Brave shortcuts launch the locker
+    instead, keeping their name and icon, and the extra "Brave (Private)"
+    shortcuts are removed.
 
-      - Your real Brave shortcuts launch the locker instead (same name, same icon).
-      - The extra "Brave (Private)" shortcuts are removed.
-      - The vault stops appearing as a drive: it mounts to a hidden folder, and
-        the volume label stops saying BraveVault.
-
-    The mount change is verified before it is kept. If the vault cannot be
-    unlocked through the new hidden path, everything is put back the way it was.
+    This no longer has to hide a drive. The vault is mounted onto Brave's own
+    profile folder and never gets a drive letter in normal use, so there is
+    nothing to hide and no passphrase needed here.
 #>
 [CmdletBinding()]
 param(
-    [string]$InstallRoot = 'C:\Program Files\BraveLocker',
-    [string]$MountFolder = 'C:\ProgramData\BraveLocker\data'
+    [string]$InstallRoot = 'C:\Program Files\BraveLocker'
 )
 
 Set-StrictMode -Version Latest
@@ -40,13 +37,8 @@ Write-Host ''
 Write-Host 'Brave Locker - lock your Brave app' -ForegroundColor Cyan
 Write-Host '=================================='
 Write-Host ''
-Write-Host 'I need your vault passphrase to check the vault still opens after the change.'
-Write-Host 'If it does not, everything is put back exactly as it is now.'
-Write-Host ''
-$passphrase = Read-Host -Prompt 'Vault passphrase' -AsSecureString
 
 # --- 1. Refresh the installed copy -----------------------------------------
-Write-Host ''
 Write-Host "Updating $InstallRoot ..."
 foreach ($sub in 'src', 'scripts') {
     $target = Join-Path $InstallRoot $sub
@@ -58,81 +50,7 @@ Set-BraveLockerScriptAcl -Path $InstallRoot
 Register-BraveLockerMountTask -ScriptPath (Join-Path $InstallRoot 'scripts\Invoke-BraveLockerVaultTask.ps1')
 Write-Host 'Installed copy refreshed and verified.'
 
-# --- 2. Hide the vault: folder mount point instead of a drive letter --------
-Write-Host ''
-Write-Host 'Hiding the vault drive...'
-
-if (-not (Test-Path $MountFolder)) {
-    New-Item -ItemType Directory -Path $MountFolder -Force | Out-Null
-}
-# A mount-point folder must be empty, and it should not invite browsing.
-(Get-Item $MountFolder).Attributes = 'Directory, Hidden'
-
-Mount-DiskImage -ImagePath $config.VhdxPath -StorageType VHDX -ErrorAction Stop | Out-Null
-$partition = Get-DiskImage -ImagePath $config.VhdxPath | Get-Disk | Get-Partition |
-    Where-Object { $_.Type -ne 'Reserved' } | Select-Object -First 1
-
-$originalLetter = $partition.DriveLetter
-$mountOk = $false
-
-try {
-    Add-PartitionAccessPath -DiskNumber $partition.DiskNumber -PartitionNumber $partition.PartitionNumber `
-        -AccessPath $MountFolder -ErrorAction Stop
-
-    if ($originalLetter) {
-        Remove-PartitionAccessPath -DiskNumber $partition.DiskNumber -PartitionNumber $partition.PartitionNumber `
-            -AccessPath "${originalLetter}:\" -ErrorAction Stop
-    }
-
-    # Prove it: unlock through the hidden path and read the profile back.
-    if (-not (Unlock-BraveLockerVault -DriveLetter $MountFolder -Passphrase $passphrase)) {
-        throw 'The vault would not unlock through the hidden folder path.'
-    }
-
-    $profileCheck = Join-Path $MountFolder $config.ProfileDirName
-    if (-not (Test-Path $profileCheck)) {
-        throw "Unlocked, but the profile was not visible at '$profileCheck'."
-    }
-
-    Write-Host 'Verified: the vault opens through the hidden folder and the profile is there.' -ForegroundColor Green
-    $mountOk = $true
-
-} catch {
-    Write-Host ''
-    Write-Host "Could not hide the drive: $($_.Exception.Message)" -ForegroundColor Yellow
-    Write-Host 'Putting the drive letter back. Nothing is lost - the vault still works as before.' -ForegroundColor Yellow
-
-    try {
-        if ($originalLetter) {
-            Add-PartitionAccessPath -DiskNumber $partition.DiskNumber -PartitionNumber $partition.PartitionNumber `
-                -AccessPath "${originalLetter}:\" -ErrorAction SilentlyContinue
-        }
-        Remove-PartitionAccessPath -DiskNumber $partition.DiskNumber -PartitionNumber $partition.PartitionNumber `
-            -AccessPath $MountFolder -ErrorAction SilentlyContinue
-    } catch {
-        Write-Host 'Rollback of the access paths reported a problem; check Disk Management.' -ForegroundColor Yellow
-    }
-}
-
-# --- 3. Drop the BraveVault label ------------------------------------------
-if ($mountOk) {
-    try {
-        $volume = Get-Volume -FilePath $MountFolder -ErrorAction Stop
-        Set-Volume -UniqueId $volume.UniqueId -NewFileSystemLabel 'Data' -ErrorAction Stop
-        Write-Host 'Volume label changed from BraveVault to Data.'
-    } catch {
-        Write-Host "Could not relabel the volume: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-}
-
-Lock-BitLocker -MountPoint $(if ($mountOk) { $MountFolder } else { "${originalLetter}:" }) -ErrorAction SilentlyContinue | Out-Null
-Dismount-BraveLockerVault -VhdxPath $config.VhdxPath
-
-# --- 4. Save the new mount path --------------------------------------------
-$config | Add-Member -NotePropertyName 'MountPath' -NotePropertyValue $(if ($mountOk) { $MountFolder } else { '' }) -Force
-$config | ConvertTo-Json -Depth 5 | Set-Content -Path $paths.ConfigPath -Encoding utf8
-
-# --- 5. Take over the real Brave shortcuts ---------------------------------
+# --- 2. Take over the real Brave shortcuts ---------------------------------
 Write-Host ''
 Write-Host 'Putting the lock on your Brave shortcuts...'
 
@@ -151,7 +69,7 @@ if ($shortcuts.Count -eq 0) {
     Write-Host "Originals backed up to $backupDir"
 }
 
-# --- 6. Remove the separate private shortcuts ------------------------------
+# --- 3. Remove the separate private shortcuts ------------------------------
 foreach ($folder in ([Environment]::GetFolderPath('Desktop')), ([Environment]::GetFolderPath('Programs'))) {
     $stale = Join-Path $folder 'Brave (Private).lnk'
     if (Test-Path $stale) {
@@ -160,7 +78,7 @@ foreach ($folder in ([Environment]::GetFolderPath('Desktop')), ([Environment]::G
     }
 }
 
-# --- 7. Record that the lock is on -----------------------------------------
+# --- 4. Record that the lock is on -----------------------------------------
 # Written last, once the takeover has actually happened, so the flag never
 # claims a lock the script failed to apply. Update-BraveLockerInstall.ps1 reads
 # it and stops itself putting the separate "Brave (Private)" shortcuts back.
@@ -170,8 +88,7 @@ $config | ConvertTo-Json -Depth 5 | Set-Content -Path $paths.ConfigPath -Encodin
 Write-Host ''
 Write-Host 'Done.' -ForegroundColor Green
 Write-Host 'Click Brave the way you always do. It will ask for your passphrase first.'
-if (-not $mountOk) {
-    Write-Host ''
-    Write-Host 'Note: the vault still uses a drive letter while Brave is open.' -ForegroundColor Yellow
-    Write-Host 'Everything else works; it just is not invisible yet.' -ForegroundColor Yellow
-}
+Write-Host ''
+Write-Host 'If you ever open Brave WITHOUT the passcode - by running brave.exe directly'
+Write-Host '- it will start an empty profile instead of yours. Nothing is lost; the'
+Write-Host 'locker moves that empty profile aside next time you open Brave properly.'

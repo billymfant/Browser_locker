@@ -51,7 +51,7 @@ if (Get-BraveLockerPropertyValue -InputObject $config -Name 'AppLocked') {
     # shortcut a browser update has dropped since the lock was applied.
     $vbs = Join-Path $InstallRoot 'scripts\BraveLockerLauncher.vbs'
     $backupDir = Join-Path $paths.StateRoot 'shortcut-backup'
-    $unlocked = @(Get-BraveLockerBraveShortcut -BraveExe $config.BraveExe)
+    $unlocked = @(Get-BraveLockerBraveShortcut -BraveExe ([string]$config.BraveExe))
 
     if ($unlocked.Count -eq 0) {
         Write-Host 'Brave shortcuts are all still locked; nothing to re-point.'

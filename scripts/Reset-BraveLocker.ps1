@@ -31,7 +31,7 @@ Import-Module (Join-Path $repoRoot 'src\BraveLocker\BraveLocker.psd1') -Force
 $paths = Get-BraveLockerPaths
 if (Test-Path $paths.ConfigPath) {
     $existing = Get-Content -Path $paths.ConfigPath -Raw | ConvertFrom-Json
-    $sourceProfile = [string](Get-BraveLockerPropertyValue -InputObject $existing -Name 'SourceProfilePath')
+    $sourceProfile = [string](Get-BraveLockerPropertyValue -InputObject $existing -Name 'PreMigrationPath')
     if ($sourceProfile -and -not (Test-BraveLockerSafeToRemoveVault -SourceProfilePath $sourceProfile).IsSafe) {
         Write-Host ''
         Write-Host 'Cannot start over: the vault is the only copy of your Brave data.' -ForegroundColor Red

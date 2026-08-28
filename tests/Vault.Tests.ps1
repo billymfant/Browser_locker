@@ -59,3 +59,36 @@ Describe 'Get-BraveLockerPreferredAccessPath' {
         Get-BraveLockerPreferredAccessPath -AccessPaths @('', 'V:\') | Should -Be 'V:'
     }
 }
+
+Describe 'Get-BraveLockerPartitionDriveLetter' {
+    It 'returns the letter when the partition has one' {
+        $p = [pscustomobject]@{ DriveLetter = 'V' }
+        Get-BraveLockerPartitionDriveLetter -Partition $p | Should -Be 'V'
+    }
+
+    It 'uppercases it' {
+        $p = [pscustomobject]@{ DriveLetter = 'v' }
+        Get-BraveLockerPartitionDriveLetter -Partition $p | Should -Be 'V'
+    }
+
+    It 'returns empty for the NUL character Windows uses to mean "no letter"' {
+        # Get-Partition reports a letterless partition as NUL, not null or ''.
+        # Read naively that looks like a real one-character drive letter, and
+        # the vault then gets unlocked against a path like ":".
+        $p = [pscustomobject]@{ DriveLetter = "`0" }
+        Get-BraveLockerPartitionDriveLetter -Partition $p | Should -Be ''
+    }
+
+    It 'returns empty for a genuinely empty letter' {
+        $p = [pscustomobject]@{ DriveLetter = '' }
+        Get-BraveLockerPartitionDriveLetter -Partition $p | Should -Be ''
+    }
+
+    It 'returns empty for a null partition rather than throwing' {
+        Get-BraveLockerPartitionDriveLetter -Partition $null | Should -Be ''
+    }
+
+    It 'returns empty when the object has no DriveLetter property at all' {
+        Get-BraveLockerPartitionDriveLetter -Partition ([pscustomobject]@{ Type = 'Basic' }) | Should -Be ''
+    }
+}
