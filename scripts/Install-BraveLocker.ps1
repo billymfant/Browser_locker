@@ -18,11 +18,16 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$VhdxPath = 'D:\apps\brave_locker\vault.vhdx',
-    [int]$MaximumSizeMB = 32768,
-    [string]$BraveExe = 'C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe',
-    [string]$ProfileMountPath = (Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User Data'),
-    [string]$InstallRoot = 'C:\Program Files\BraveLocker',
+    # All of these are discovered on the machine setup is running on when left
+    # empty. Nothing here may default to a path that happened to exist on the
+    # developer's PC - this script has to work on a computer with no D: drive
+    # and a browser installed somewhere unexpected.
+    [string]$BrowserId = 'brave',
+    [string]$VhdxPath = '',
+    [int]$MaximumSizeMB = 0,
+    [string]$BraveExe = '',
+    [string]$ProfileMountPath = '',
+    [string]$InstallRoot = (Join-Path $env:ProgramFiles 'BraveLocker'),
     # A file holding the passphrase DPAPI-protected under this account, as
     # written by ConvertFrom-SecureString. Used instead of the popup so the
     # stored passphrase cannot be altered by whatever keyboard layout happens
@@ -35,6 +40,41 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $repoRoot 'src\BraveLocker\BraveLocker.psd1') -Force
+
+# --- 0. Work out where everything is on THIS machine ------------------------
+$browser = Get-BraveLockerBrowserById -Id $BrowserId
+if ($null -eq $browser) {
+    $known = ((Get-BraveLockerBrowserCatalog | ForEach-Object { $_.Id }) -join ', ')
+    throw "Unknown browser '$BrowserId'. Known browsers: $known"
+}
+if (-not $browser.IsSupported) {
+    throw "$($browser.Name) is not supported yet. $($browser.Note)"
+}
+
+if (-not $BraveExe)         { $BraveExe = Get-BraveLockerBrowserExePath -Browser $browser }
+if (-not $ProfileMountPath) { $ProfileMountPath = Get-BraveLockerBrowserProfileRoot -Browser $browser }
+
+if (-not $BraveExe) {
+    throw "$($browser.Name) could not be found on this PC. Install it first, or pass -BraveExe."
+}
+
+$profileState = Test-BraveLockerProfileUsable -Path $ProfileMountPath
+if (-not $profileState.IsUsable) {
+    throw "No usable $($browser.Name) profile at '$ProfileMountPath' ($($profileState.Reason)). Open $($browser.Name) once, then run setup again."
+}
+
+if (-not $MaximumSizeMB) {
+    $MaximumSizeMB = Get-BraveLockerVaultSizeMB -ProfileSizeBytes $profileState.SizeBytes
+}
+
+if (-not $VhdxPath) {
+    $needed = [int64]($profileState.SizeBytes * 2) + 1GB
+    $vaultDrive = Select-BraveLockerVaultDrive -Volume @(Get-Volume -ErrorAction SilentlyContinue) -RequiredBytes $needed
+    if (-not $vaultDrive) {
+        throw 'No NTFS drive has enough free space for the vault. Free some space, or pass -VhdxPath.'
+    }
+    $VhdxPath = Get-BraveLockerDefaultVaultPath -DriveLetter $vaultDrive
+}
 
 $preMigrationPath = "$ProfileMountPath.premigration"
 
@@ -50,18 +90,24 @@ function Read-BraveLockerPlainText {
 }
 
 Write-Host ''
-Write-Host 'Brave Locker setup' -ForegroundColor Cyan
-Write-Host '=================='
+Write-Host "Browser Locker setup - $($browser.Name)" -ForegroundColor Cyan
+Write-Host '========================================'
+Write-Host ''
+# Built first, then printed: "Write-Host '...' -f x" binds -f to
+# -ForegroundColor, not the format operator.
+$profileLine = '  profile : {0}  ({1:N2} GB)' -f $ProfileMountPath, ($profileState.SizeBytes / 1GB)
+$vaultLine   = '  vault   : {0}  (up to {1} GB)' -f $VhdxPath, [int]($MaximumSizeMB / 1024)
+Write-Host "  browser : $BraveExe"
+Write-Host $profileLine
+Write-Host $vaultLine
 Write-Host ''
 
 # --- 1. Preconditions -------------------------------------------------------
-if (-not (Test-Path $BraveExe))         { throw "Brave was not found at '$BraveExe'." }
-if (-not (Test-Path $ProfileMountPath)) { throw "No Brave profile found at '$ProfileMountPath'." }
-if (Test-Path $VhdxPath)                { throw "A vault already exists at '$VhdxPath'. Delete it first if you truly want to start over." }
-if (Test-Path $preMigrationPath)        { throw "'$preMigrationPath' already exists. A previous setup left it behind - move it out of the way first." }
+if (Test-Path $VhdxPath)         { throw "A vault already exists at '$VhdxPath'. Delete it first if you truly want to start over." }
+if (Test-Path $preMigrationPath) { throw "'$preMigrationPath' already exists. A previous setup left it behind - move it out of the way first." }
 
-if (@(Get-Process -Name 'brave' -ErrorAction SilentlyContinue).Count -gt 0) {
-    throw 'Close Brave completely before running setup, so the profile is copied in a consistent state.'
+if (@(Get-Process -Name $browser.ProcessName -ErrorAction SilentlyContinue).Count -gt 0) {
+    throw "Close $($browser.Name) completely before running setup, so the profile is copied in a consistent state."
 }
 
 # --- 2. Passphrase ----------------------------------------------------------
@@ -306,13 +352,9 @@ $paths = Get-BraveLockerPaths
 if (-not (Test-Path $paths.StateRoot)) {
     New-Item -ItemType Directory -Path $paths.StateRoot -Force | Out-Null
 }
-[pscustomobject]@{
-    VhdxPath         = $VhdxPath
-    ProfileMountPath = $ProfileMountPath
-    PreMigrationPath = $preMigrationPath
-    BraveExe         = $BraveExe
-    InstallRoot      = $InstallRoot
-} | ConvertTo-Json -Depth 5 | Set-Content -Path $paths.ConfigPath -Encoding utf8
+Save-BraveLockerConfig -VhdxPath $VhdxPath -ProfileMountPath $ProfileMountPath `
+    -PreMigrationPath $preMigrationPath -BraveExe $BraveExe -InstallRoot $InstallRoot `
+    -BrowserId $browser.Id -BrowserName $browser.Name -BrowserExeName $browser.ExeName | Out-Null
 
 # --- 9. Register the elevated helper ---------------------------------------
 $installedTaskScript = Join-Path $InstallRoot 'scripts\Invoke-BraveLockerVaultTask.ps1'
