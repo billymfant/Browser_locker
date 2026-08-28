@@ -70,7 +70,10 @@ Describe 'shortcut takeover round-trip' {
         Set-BraveLockerShortcutToLauncher -ShortcutPath $script:lnk -VbsPath $script:vbs `
             -BraveExe $script:brave -BackupDir $script:backupDir
 
-        (Get-ChildItem -Path $script:backupDir -Filter '*.lnk').Count | Should -Be 1
+        # Wrapped in @() because a single result is a scalar, and .Count on a
+        # scalar throws under Set-StrictMode -Version Latest - which the build
+        # script sets, so this passed locally and failed the moment it mattered.
+        @(Get-ChildItem -Path $script:backupDir -Filter '*.lnk').Count | Should -Be 1
     }
 
     It 'restores the original target exactly' {
