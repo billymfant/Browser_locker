@@ -22,7 +22,12 @@ param(
     [int]$MaximumSizeMB = 32768,
     [string]$BraveExe = 'C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe',
     [string]$ProfileMountPath = (Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User Data'),
-    [string]$InstallRoot = 'C:\Program Files\BraveLocker'
+    [string]$InstallRoot = 'C:\Program Files\BraveLocker',
+    # A file holding the passphrase DPAPI-protected under this account, as
+    # written by ConvertFrom-SecureString. Used instead of the popup so the
+    # stored passphrase cannot be altered by whatever keyboard layout happens
+    # to be active. The file is deleted as soon as it has been read.
+    [string]$PassphraseFile = ''
 )
 
 Set-StrictMode -Version Latest
@@ -73,6 +78,25 @@ Write-Host 'A popup will ask for it - type it THERE, not in this window.' -Foreg
 Write-Host ''
 
 $passphrase = $null
+
+if ($PassphraseFile) {
+    if (-not (Test-Path $PassphraseFile)) {
+        throw "No passphrase file at '$PassphraseFile'."
+    }
+    $blob = (Get-Content -Path $PassphraseFile -Raw).Trim()
+    $passphrase = ConvertTo-SecureString -String $blob -ErrorAction Stop
+    Remove-Item -Path $PassphraseFile -Force -ErrorAction SilentlyContinue
+    Remove-Variable blob
+
+    $plainSupplied = Read-BraveLockerPlainText -Secure $passphrase
+    $suppliedCheck = Test-BraveLockerPassphrase -Passphrase $plainSupplied
+    if (-not $suppliedCheck.IsValid) {
+        throw "The supplied passphrase is not usable ($($suppliedCheck.Reason))."
+    }
+    Write-Host ('Passphrase supplied directly ({0} characters) - no keyboard involved.' -f $plainSupplied.Length) -ForegroundColor Green
+    Remove-Variable plainSupplied
+}
+
 while ($null -eq $passphrase) {
     $first = Show-BraveLockerPassphrasePrompt -Title 'Brave Locker setup' `
         -Prompt 'Choose a vault passphrase (at least 8 characters)' `
@@ -177,6 +201,67 @@ if ($confirm -ne 'STORED') {
     throw 'Setup cancelled and the vault deleted, because the recovery key was not stored. Your Brave profile was not touched.'
 }
 Clear-Variable recoveryKey
+
+# --- 5b. Prove the passphrase can be RETYPED -------------------------------
+# Verifying the vault opens with the SecureString already held in memory proves
+# nothing about whether the user can reproduce it. On a machine with more than
+# one keyboard layout the same keys produce different characters - "mirmigimebira"
+# typed on a Greek layout is "μιρμιγιμεβιρα" - so a passphrase can be stored,
+# confirmed twice, and still be untypeable afterwards. That happened here, three
+# times, and each time setup reported success.
+#
+# So the vault is sealed and reopened with a freshly typed passphrase before any
+# data goes into it. If that cannot be done, the vault is useless and is deleted
+# now rather than after the profile has been migrated into it.
+Write-Host ''
+Write-Host 'Checking you can actually type that passphrase' -ForegroundColor Cyan
+Write-Host '---------------------------------------------'
+Write-Host 'The vault is about to be sealed and reopened with what you type, so a'
+Write-Host 'passphrase that cannot be reproduced is caught now rather than later.'
+Write-Host ''
+
+Lock-BitLocker -MountPoint $mount -ErrorAction SilentlyContinue | Out-Null
+
+$typedOk = $false
+for ($attempt = 1; $attempt -le 3 -and -not $typedOk; $attempt++) {
+    $typed = Show-BraveLockerPassphrasePrompt -Title 'Brave Locker setup' `
+        -Prompt "Type your passphrase to confirm (attempt $attempt of 3)" `
+        -Note 'This must be typed, not remembered - it is the real test.'
+    if ($null -eq $typed) {
+        Dismount-BraveLockerVault -VhdxPath $VhdxPath
+        Remove-Item -Path $VhdxPath -Force -ErrorAction SilentlyContinue
+        throw 'Setup cancelled at the passphrase check, and the vault deleted. Your Brave profile was not touched.'
+    }
+
+    $plainTyped = Read-BraveLockerPlainText -Secure $typed
+    $nonAscii = @($plainTyped.ToCharArray() | Where-Object { [int]$_ -gt 127 }).Count
+    $typedLength = $plainTyped.Length
+    Remove-Variable plainTyped
+
+    if (Unlock-BraveLockerVault -MountPoint $mount -Passphrase $typed) {
+        $typedOk = $true
+        Write-Host '  Confirmed - the passphrase you typed opens the vault.' -ForegroundColor Green
+        break
+    }
+
+    Write-Host ''
+    Write-Host ("  Rejected. What you typed was $typedLength characters, $nonAscii of them non-ASCII.") -ForegroundColor Yellow
+    if ($nonAscii -gt 0) {
+        Write-Host ''
+        Write-Host '  Your keyboard is producing non-English characters.' -ForegroundColor Red
+        Write-Host '  Press Alt+Shift (or Win+Space) to switch to the English layout,' -ForegroundColor Yellow
+        Write-Host '  check the language indicator by the clock says ENG, and try again.' -ForegroundColor Yellow
+    } else {
+        Write-Host '  Those are ordinary characters, so this looks like a typo.' -ForegroundColor Yellow
+    }
+    Write-Host ''
+}
+
+if (-not $typedOk) {
+    Dismount-BraveLockerVault -VhdxPath $VhdxPath
+    Remove-Item -Path $VhdxPath -Force -ErrorAction SilentlyContinue
+    throw 'The passphrase could not be typed back correctly, so the vault was deleted rather than left unopenable. Your Brave profile was not touched.'
+}
 
 # --- 6. Copy the profile to the VAULT ROOT ---------------------------------
 # Root, not a subfolder: the vault gets mounted onto Brave's profile folder, so
