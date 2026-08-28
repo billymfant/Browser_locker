@@ -226,3 +226,30 @@ Describe 'Test-BraveLockerRequirement: existing installation' {
             Should -Match 'Reset-BraveLocker|Uninstall-BraveLocker'
     }
 }
+
+Describe 'Test-BraveLockerRequirement: profile wording' {
+    It 'does not claim the profile is missing when it is sealed in the vault' {
+        # On an installed machine the profile folder IS the vault mount point,
+        # and it is empty whenever the vault is sealed. Telling that user "no
+        # profile found, open Brave once" says their data is gone when it is
+        # encrypted and intact.
+        $r = Test-BraveLockerRequirement `
+            -CryptoStatus ([pscustomobject]@{ IsAvailable = $true; Reason = 'OK'; Detail = 'ok' }) `
+            -IsElevated $true -BraveExe 'C:\brave.exe' -ProfilePath 'C:\nope' `
+            -AlreadyInstalled $true -BraveProcessCount 0 -VaultDriveLetter 'D'
+
+        $detail = ($r.Checks | Where-Object { $_.Name -eq 'Brave profile' }).Detail
+        $detail | Should -Match 'inside the vault'
+        $detail | Should -Not -Match 'run setup again'
+    }
+
+    It 'still gives fresh-install advice when nothing is installed' {
+        $r = Test-BraveLockerRequirement `
+            -CryptoStatus ([pscustomobject]@{ IsAvailable = $true; Reason = 'OK'; Detail = 'ok' }) `
+            -IsElevated $true -BraveExe 'C:\brave.exe' -ProfilePath 'C:\nope' `
+            -AlreadyInstalled $false -BraveProcessCount 0 -VaultDriveLetter 'D'
+
+        ($r.Checks | Where-Object { $_.Name -eq 'Brave profile' }).Detail |
+            Should -Match 'Open Brave once'
+    }
+}

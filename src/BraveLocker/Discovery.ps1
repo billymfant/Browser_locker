@@ -214,11 +214,21 @@ function Test-BraveLockerRequirement {
 
     if ($null -eq $ProfilePath) { $ProfilePath = Get-BraveLockerProfileRoot }
     $profileState = Test-BraveLockerProfileUsable -Path ([string]$ProfilePath)
-    Add-Check 'Brave profile' $profileState.IsUsable $(if ($profileState.IsUsable) {
-        "{0} profile(s), {1:N2} GB at {2}" -f $profileState.ProfileCount, ($profileState.SizeBytes / 1GB), $ProfilePath
+
+    # When Brave Locker is already installed, this folder is the vault's mount
+    # point and is empty whenever the vault is sealed. Reporting that as "no
+    # profile found - open Brave once" would tell someone their profile is
+    # missing when it is in fact encrypted and intact.
+    $profileDetail = ''
+    if ($profileState.IsUsable) {
+        $profileDetail = "{0} profile(s), {1:N2} GB at {2}" -f `
+            $profileState.ProfileCount, ($profileState.SizeBytes / 1GB), $ProfilePath
+    } elseif (-not $notInstalled) {
+        $profileDetail = "Your profile is inside the vault, which is sealed right now - so this folder is empty, exactly as it should be. Nothing is missing."
     } else {
-        "No usable Brave profile at $ProfilePath ($($profileState.Reason)). Open Brave once, then run setup again."
-    })
+        $profileDetail = "No usable Brave profile at $ProfilePath ($($profileState.Reason)). Open Brave once so it creates one, then run setup again."
+    }
+    Add-Check 'Brave profile' $profileState.IsUsable $profileDetail
 
     if ($null -eq $BraveProcessCount) {
         $BraveProcessCount = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue).Count
