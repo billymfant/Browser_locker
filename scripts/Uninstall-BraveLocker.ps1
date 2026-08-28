@@ -28,9 +28,12 @@ if (Test-Path $paths.ConfigPath) {
     $config = Get-Content -Path $paths.ConfigPath -Raw | ConvertFrom-Json
 }
 
-$vhdxPath = 'D:\apps\brave_locker\vault.vhdx'
-$braveExe = 'C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe'
-$sourceProfile = Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User Data'
+# No guessed defaults. The config records where the vault actually is; without
+# it, guessing a path means either deleting nothing and reporting success, or
+# reaching for a file that belongs to something else.
+$vhdxPath = ''
+$braveExe = ''
+$sourceProfile = ''
 if ($config) {
     $vhdxPath = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'VhdxPath')
     $braveExe = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'BraveExe')
@@ -45,6 +48,17 @@ if ($config) {
             break
         }
     }
+}
+
+if (-not $config) {
+    Write-Host 'No Browser Locker configuration was found on this PC.' -ForegroundColor Yellow
+    Write-Host 'Without it there is no record of where the vault lives or which browser'
+    Write-Host 'was locked, so there is nothing safe to remove automatically.'
+    Write-Host ''
+    Write-Host 'If a vault file exists, delete it by hand once you have copied your'
+    Write-Host 'profile out of it - and restore your browser shortcuts from'
+    Write-Host "  $(Join-Path $paths.StateRoot 'shortcut-backup')" -ForegroundColor Cyan
+    return
 }
 
 if ([string]::IsNullOrWhiteSpace($sourceProfile)) {
