@@ -87,26 +87,29 @@ if (-not $Force) {
 # --- 1. Restore Brave's own shortcuts (before deleting the backups) --------
 Write-Host ''
 $backupDir = Join-Path $paths.StateRoot 'shortcut-backup'
-if (Test-Path $backupDir) {
+$takenOver = @(Get-BraveLockerShortcutManifest -BackupDir $backupDir)
+
+if ($takenOver.Count -eq 0) {
+    Write-Host '  no shortcut backups found'
+} else {
     $restored = 0
-    # Restore every shortcut we hold a backup for, wherever it lives.
-    foreach ($candidate in @(
-            (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Brave.lnk')
-            (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Brave.lnk')
-            (Join-Path ([Environment]::GetFolderPath('Programs')) 'Brave.lnk')
-            (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Brave.lnk')
-            (Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Brave.lnk')
-        )) {
-        $backupPath = Get-BraveLockerShortcutBackupPath -ShortcutPath $candidate -BackupDir $backupDir
-        if (Test-Path $backupPath) {
-            Copy-Item -Path $backupPath -Destination $candidate -Force
-            Write-Host "  restored: $candidate"
+    $failed = @()
+    foreach ($shortcut in $takenOver) {
+        try {
+            Restore-BraveLockerShortcut -ShortcutPath $shortcut -BackupDir $backupDir
+            Write-Host "  restored: $shortcut"
             $restored++
+        } catch {
+            $failed += $shortcut
         }
     }
     if ($restored -eq 0) { Write-Host '  no shortcut backups matched; nothing to restore' }
-} else {
-    Write-Host '  no shortcut backups found'
+    foreach ($shortcut in $failed) {
+        # Named individually: a shortcut left pointing at a launcher that is
+        # about to be deleted would simply stop working, so the user has to
+        # know which one to recreate.
+        Write-Host "  COULD NOT restore '$shortcut' - recreate it by hand from Brave" -ForegroundColor Yellow
+    }
 }
 
 # --- 2. Remove any leftover private shortcuts ------------------------------

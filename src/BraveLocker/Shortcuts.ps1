@@ -82,6 +82,10 @@ function Set-BraveLockerShortcutToLauncher {
     $link.WorkingDirectory = Split-Path -Parent $VbsPath
     $link.Description = 'Brave'
     $link.Save()
+
+    # Recorded only after the shortcut has actually been repointed, so the
+    # manifest never claims a takeover that did not happen.
+    Add-BraveLockerShortcutManifestEntry -BackupDir $BackupDir -ShortcutPath $ShortcutPath | Out-Null
 }
 
 function Restore-BraveLockerShortcut {
@@ -140,4 +144,60 @@ function Get-BraveLockerBraveShortcut {
     }
 
     $found.ToArray()
+}
+
+function Get-BraveLockerShortcutManifestPath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$BackupDir)
+
+    Join-Path $BackupDir 'shortcuts.json'
+}
+
+function Get-BraveLockerShortcutManifest {
+    <#
+        The shortcuts the locker has taken over, by their original path.
+
+        A backup file is named after a hash of that path, which cannot be
+        reversed - so without this record the uninstaller has no way to match a
+        backup back to the shortcut it came from, and would leave the user
+        clicking a launcher whose config it had just deleted.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)][string]$BackupDir)
+
+    $manifestPath = Get-BraveLockerShortcutManifestPath -BackupDir $BackupDir
+    if (-not (Test-Path $manifestPath)) { return @() }
+
+    try {
+        $entries = Get-Content -Path $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        # A damaged manifest must not stop an uninstall; the caller falls back
+        # to reporting that it found nothing to restore.
+        return @()
+    }
+
+    @($entries | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { [string]$_ })
+}
+
+function Add-BraveLockerShortcutManifestEntry {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][string]$BackupDir,
+        [Parameter(Mandatory)][string]$ShortcutPath
+    )
+
+    if (-not (Test-Path $BackupDir)) {
+        New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
+    }
+
+    $entries = @(Get-BraveLockerShortcutManifest -BackupDir $BackupDir)
+    if ($entries -notcontains $ShortcutPath) { $entries += $ShortcutPath }
+
+    ConvertTo-Json -InputObject ([string[]]$entries) -Depth 3 |
+        Set-Content -Path (Get-BraveLockerShortcutManifestPath -BackupDir $BackupDir) -Encoding utf8
+
+    $entries
 }

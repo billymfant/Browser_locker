@@ -51,7 +51,26 @@ function Complete-BraveLockerSession {
 # A crash must not leave the profile decrypted, so seal any vault left attached
 # by a previous session before doing anything else.
 if (Test-BraveLockerVaultMounted -VhdxPath $config.VhdxPath) {
-    Complete-BraveLockerSession -VhdxPath $config.VhdxPath | Out-Null
+    # Close any Brave still holding the old session open, or the dismount will
+    # fail on its open handles.
+    $staleProfile = ''
+    $knownMount = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'MountPath')
+    if ($knownMount) { $staleProfile = Join-Path $knownMount $config.ProfileDirName }
+
+    if (-not (Complete-BraveLockerSession -VhdxPath $config.VhdxPath -ProfilePath $staleProfile)) {
+        # Stopping here matters. Carrying on would unlock an already-unlocked
+        # volume, which BitLocker reports as a failure - so a correct passphrase
+        # would be shown as wrong and logged as a failed attempt.
+        Show-BraveLockerMessage -Icon 'Error' -Message @'
+The vault was left open by a previous session and could not be sealed.
+
+Something still has a file open on it - most likely a Brave window that is
+still running. Close it and try again.
+
+Nothing has been lost and your passphrase is fine.
+'@
+        return
+    }
 }
 
 # --- Cooldown ---------------------------------------------------------------

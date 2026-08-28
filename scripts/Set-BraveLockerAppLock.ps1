@@ -160,6 +160,13 @@ foreach ($folder in ([Environment]::GetFolderPath('Desktop')), ([Environment]::G
     }
 }
 
+# --- 7. Record that the lock is on -----------------------------------------
+# Written last, once the takeover has actually happened, so the flag never
+# claims a lock the script failed to apply. Update-BraveLockerInstall.ps1 reads
+# it and stops itself putting the separate "Brave (Private)" shortcuts back.
+$config | Add-Member -NotePropertyName 'AppLocked' -NotePropertyValue $true -Force
+$config | ConvertTo-Json -Depth 5 | Set-Content -Path $paths.ConfigPath -Encoding utf8
+
 Write-Host ''
 Write-Host 'Done.' -ForegroundColor Green
 Write-Host 'Click Brave the way you always do. It will ask for your passphrase first.'

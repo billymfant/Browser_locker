@@ -98,3 +98,82 @@ Describe 'shortcut takeover round-trip' {
         (New-Object -ComObject WScript.Shell).CreateShortcut($script:lnk).TargetPath | Should -Be $script:brave
     }
 }
+
+Describe 'shortcut takeover manifest' {
+    BeforeEach {
+        $script:workDir = Join-Path $TestDrive (New-Guid).Guid
+        New-Item -ItemType Directory -Path $script:workDir | Out-Null
+        $script:backupDir = Join-Path $script:workDir 'backup'
+        $script:vbs = Join-Path $script:workDir 'Launcher.vbs'
+        Set-Content -Path $script:vbs -Value "' launcher" -Encoding ascii
+
+        $shell = New-Object -ComObject WScript.Shell
+        # Deliberately not called "Brave.lnk", and nested, because that is the
+        # case the uninstaller used to be unable to restore.
+        $nested = Join-Path $script:workDir 'Start Menu\Brave'
+        New-Item -ItemType Directory -Path $nested -Force | Out-Null
+        $script:oddLnk = Join-Path $nested 'Brave Browser.lnk'
+        $link = $shell.CreateShortcut($script:oddLnk)
+        $link.TargetPath = $script:brave
+        $link.Save()
+    }
+
+    It 'is empty before any takeover' {
+        Get-BraveLockerShortcutManifest -BackupDir $script:backupDir | Should -BeNullOrEmpty
+    }
+
+    It 'records a taken-over shortcut by its original path' {
+        Set-BraveLockerShortcutToLauncher -ShortcutPath $script:oddLnk -VbsPath $script:vbs `
+            -BraveExe $script:brave -BackupDir $script:backupDir
+
+        @(Get-BraveLockerShortcutManifest -BackupDir $script:backupDir) | Should -Be @($script:oddLnk)
+    }
+
+    It 'does not record the same shortcut twice' {
+        Set-BraveLockerShortcutToLauncher -ShortcutPath $script:oddLnk -VbsPath $script:vbs `
+            -BraveExe $script:brave -BackupDir $script:backupDir
+        Set-BraveLockerShortcutToLauncher -ShortcutPath $script:oddLnk -VbsPath $script:vbs `
+            -BraveExe $script:brave -BackupDir $script:backupDir
+
+        @(Get-BraveLockerShortcutManifest -BackupDir $script:backupDir).Count | Should -Be 1
+    }
+
+    It 'lets a shortcut that is not called Brave.lnk be restored' {
+        # The uninstaller can only find a backup if it knows the original path:
+        # the backup file name is a hash of that path and cannot be reversed.
+        Set-BraveLockerShortcutToLauncher -ShortcutPath $script:oddLnk -VbsPath $script:vbs `
+            -BraveExe $script:brave -BackupDir $script:backupDir
+
+        foreach ($recorded in Get-BraveLockerShortcutManifest -BackupDir $script:backupDir) {
+            Restore-BraveLockerShortcut -ShortcutPath $recorded -BackupDir $script:backupDir
+        }
+
+        (New-Object -ComObject WScript.Shell).CreateShortcut($script:oddLnk).TargetPath |
+            Should -Be $script:brave
+    }
+
+    It 'records every shortcut when several are taken over' {
+        $second = Join-Path $script:workDir 'Desktop Brave.lnk'
+        $link = (New-Object -ComObject WScript.Shell).CreateShortcut($second)
+        $link.TargetPath = $script:brave
+        $link.Save()
+
+        Set-BraveLockerShortcutToLauncher -ShortcutPath $script:oddLnk -VbsPath $script:vbs `
+            -BraveExe $script:brave -BackupDir $script:backupDir
+        Set-BraveLockerShortcutToLauncher -ShortcutPath $second -VbsPath $script:vbs `
+            -BraveExe $script:brave -BackupDir $script:backupDir
+
+        $manifest = @(Get-BraveLockerShortcutManifest -BackupDir $script:backupDir)
+        $manifest.Count | Should -Be 2
+        $manifest | Should -Contain $second
+    }
+
+    It 'treats a damaged manifest as nothing to restore rather than throwing' {
+        Set-BraveLockerShortcutToLauncher -ShortcutPath $script:oddLnk -VbsPath $script:vbs `
+            -BraveExe $script:brave -BackupDir $script:backupDir
+        Set-Content -Path (Get-BraveLockerShortcutManifestPath -BackupDir $script:backupDir) `
+            -Value '{ not json' -Encoding utf8
+
+        Get-BraveLockerShortcutManifest -BackupDir $script:backupDir | Should -BeNullOrEmpty
+    }
+}

@@ -8,6 +8,12 @@
     never at risk here: the vault is only a copy while your original profile
     still exists, and the uninstaller refuses to run if it does not.
 
+    That last point is also this script's limit. Once
+    Complete-BraveLockerMigration.ps1 has deleted the original profile, the
+    vault holds the only copy of your logins and cards, so there is nothing left
+    to rebuild a new vault from and this script will not run. Change your
+    passcode BEFORE running the migration cleanup, not after.
+
     Run this from an elevated PowerShell with Brave closed.
 #>
 [CmdletBinding()]
@@ -17,6 +23,30 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $here = $PSScriptRoot
+$repoRoot = Split-Path -Parent $here
+Import-Module (Join-Path $repoRoot 'src\BraveLocker\BraveLocker.psd1') -Force
+
+# Say this here rather than letting the user get most of the way in and hit a
+# refusal from deep inside the uninstaller.
+$paths = Get-BraveLockerPaths
+if (Test-Path $paths.ConfigPath) {
+    $existing = Get-Content -Path $paths.ConfigPath -Raw | ConvertFrom-Json
+    $sourceProfile = [string](Get-BraveLockerPropertyValue -InputObject $existing -Name 'SourceProfilePath')
+    if ($sourceProfile -and -not (Test-BraveLockerSafeToRemoveVault -SourceProfilePath $sourceProfile).IsSafe) {
+        Write-Host ''
+        Write-Host 'Cannot start over: the vault is the only copy of your Brave data.' -ForegroundColor Red
+        Write-Host ''
+        Write-Host "Your original profile at"
+        Write-Host "  $sourceProfile"
+        Write-Host 'is gone, so the migration cleanup has already been run. This script would'
+        Write-Host 'have to delete the vault to build a new one, and there is nothing left to'
+        Write-Host 'rebuild it from - that would destroy your logins, passwords and cards.'
+        Write-Host ''
+        Write-Host 'The passcode can only be changed BEFORE the migration cleanup runs.' -ForegroundColor Yellow
+        Write-Host 'From here, your BitLocker recovery key is the way in if the passphrase is lost.'
+        return
+    }
+}
 
 Write-Host ''
 Write-Host '==========================================' -ForegroundColor Cyan
