@@ -8,7 +8,10 @@ function Test-BraveLockerShortcutTargetsBrave {
     [OutputType([bool])]
     param(
         [Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$TargetPath,
-        [Parameter(Mandatory)][string]$BraveExe
+        [Parameter(Mandatory)][string]$BraveExe,
+        # Overrides the executable derived from BraveExe. Lets a caller ask
+        # "does this shortcut launch chrome.exe" without owning a path to it.
+        [string]$ExeName = ''
     )
 
     if ([string]::IsNullOrWhiteSpace($TargetPath)) { return $false }
@@ -16,7 +19,15 @@ function Test-BraveLockerShortcutTargetsBrave {
     $leaf = [System.IO.Path]::GetFileName($TargetPath.Trim())
     if (-not $leaf) { return $false }
 
-    $leaf.ToLowerInvariant() -eq 'brave.exe'
+    # Which executable counts is taken from the browser being locked, not
+    # assumed to be Brave - the tool can lock Chrome, Edge, Vivaldi or Opera.
+    $wanted = $ExeName
+    if ([string]::IsNullOrWhiteSpace($wanted)) {
+        $wanted = [System.IO.Path]::GetFileName($BraveExe.Trim())
+    }
+    if ([string]::IsNullOrWhiteSpace($wanted)) { return $false }
+
+    $leaf.ToLowerInvariant() -eq $wanted.ToLowerInvariant()
 }
 
 function Get-BraveLockerShortcutBackupPath {
@@ -112,6 +123,7 @@ function Get-BraveLockerBraveShortcut {
     [OutputType([string[]])]
     param(
         [Parameter(Mandatory)][string]$BraveExe,
+        [string]$ExeName = '',
         [string[]]$SearchPath
     )
 
@@ -137,7 +149,7 @@ function Get-BraveLockerBraveShortcut {
             } catch {
                 return
             }
-            if (Test-BraveLockerShortcutTargetsBrave -TargetPath $target -BraveExe $BraveExe) {
+            if (Test-BraveLockerShortcutTargetsBrave -TargetPath $target -BraveExe $BraveExe -ExeName $ExeName) {
                 $found.Add($_.FullName)
             }
         }

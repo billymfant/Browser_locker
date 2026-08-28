@@ -254,7 +254,13 @@ function Save-BraveLockerConfig {
         [Parameter(Mandatory)][string]$PreMigrationPath,
         [Parameter(Mandatory)][string]$BraveExe,
         [Parameter(Mandatory)][string]$InstallRoot,
-        [string]$Provider = 'BitLocker'
+        [string]$Provider = 'BitLocker',
+        # Which browser this install locks. The launcher needs the executable to
+        # start it, the process name to know when it has closed, and the display
+        # name so its messages say "Chrome" rather than always "Brave".
+        [string]$BrowserId = 'brave',
+        [string]$BrowserName = 'Brave',
+        [string]$BrowserExeName = 'brave.exe'
     )
 
     $paths = Get-BraveLockerPaths
@@ -266,6 +272,12 @@ function Save-BraveLockerConfig {
         VhdxPath         = $VhdxPath
         ProfileMountPath = $ProfileMountPath
         PreMigrationPath = $PreMigrationPath
+        BrowserId        = $BrowserId
+        BrowserName      = $BrowserName
+        BrowserExe       = $BraveExe
+        BrowserExeName   = $BrowserExeName
+        # Kept so an install written by this version still works if rolled back
+        # to one that only knew about Brave.
         BraveExe         = $BraveExe
         InstallRoot      = $InstallRoot
         CryptoProvider   = $Provider

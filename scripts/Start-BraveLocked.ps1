@@ -38,6 +38,15 @@ Run Install-BraveLocker.ps1 from an administrator PowerShell first.
 $config = Get-Content -Path $paths.ConfigPath -Raw | ConvertFrom-Json
 $mountFolder = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'ProfileMountPath')
 
+# Which browser this install locks. Older configs predate the choice and are
+# Brave by definition.
+$browserExe = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'BrowserExe')
+if (-not $browserExe) { $browserExe = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'BraveExe') }
+$browserExeName = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'BrowserExeName')
+if (-not $browserExeName) { $browserExeName = 'brave.exe' }
+$browserName = [string](Get-BraveLockerPropertyValue -InputObject $config -Name 'BrowserName')
+if (-not $browserName) { $browserName = 'Brave' }
+
 if ([string]::IsNullOrWhiteSpace($mountFolder)) {
     Show-BraveLockerMessage -Icon 'Error' -Message @'
 This Brave Locker setup is from an older version and cannot be used.
@@ -56,7 +65,7 @@ function Complete-BraveLockerSession {
     )
 
     if ($StopBrave) {
-        if (-not (Stop-BraveLockerBrowser -AnyProfile -TimeoutSeconds 15)) {
+        if (-not (Stop-BraveLockerBrowser -AnyProfile -ExeName $browserExeName -TimeoutSeconds 15)) {
             return $false
         }
     }
@@ -73,14 +82,14 @@ if (Test-BraveLockerVaultMounted -VhdxPath $config.VhdxPath) {
         # Stopping here matters. Carrying on would unlock an already-unlocked
         # volume, which BitLocker reports as a failure - so a correct passphrase
         # would be shown as wrong and logged as a failed attempt.
-        Show-BraveLockerMessage -Icon 'Error' -Message @'
+        Show-BraveLockerMessage -Icon 'Error' -Message @"
 The vault was left open by a previous session and could not be sealed.
 
-Something still has a file open on it - most likely a Brave window that is
-still running. Close it and try again.
+Something still has a file open on it - most likely a $browserName window that
+is still running. Close it and try again.
 
 Nothing has been lost and your passphrase is fine.
-'@
+"@
         return
     }
 }
@@ -116,8 +125,8 @@ Restart the PC and try again.
 
 if ($prepared.Action -eq 'QuarantinedStrayProfile') {
     Show-BraveLockerMessage -Icon 'Warning' -Message @"
-Brave had been opened without its passcode at some point, and started a new,
-empty profile.
+$browserName had been opened without its passcode at some point, and started a
+new, empty profile.
 
 That profile has been moved aside - nothing was deleted - to:
 
@@ -135,7 +144,7 @@ if ($prior.FailureCount -gt 0 -and $prior.LastFailureUtc) {
     $note = "$($prior.FailureCount) failed attempt(s) since the last successful open, most recent $when."
 }
 
-$passphrase = Show-BraveLockerPassphrasePrompt -IconSource $config.BraveExe -Note $note
+$passphrase = Show-BraveLockerPassphrasePrompt -Title $browserName -IconSource $browserExe -Note $note
 if ($null -eq $passphrase) { return }   # Cancelled - nothing to do, nothing to report.
 
 # --- Open the vault ---------------------------------------------------------
@@ -185,15 +194,15 @@ $($mountResult.Reason) $($mountResult.Error)
 Clear-BraveLockerFailedAttempts -StatePath $paths.StatePath | Out-Null
 
 try {
-    Start-BraveLockerBrowser -BraveExe $config.BraveExe -UseDefaultProfile | Out-Null
-    Wait-BraveLockerBrowserExit -AnyProfile
+    Start-BraveLockerBrowser -BraveExe $browserExe -UseDefaultProfile | Out-Null
+    Wait-BraveLockerBrowserExit -AnyProfile -ExeName $browserExeName
 } finally {
     if (-not (Complete-BraveLockerSession -VhdxPath $config.VhdxPath -MountFolder $mountFolder)) {
-        Show-BraveLockerMessage -Icon 'Warning' -Message @'
-Brave has closed, but the vault could not be sealed.
+        Show-BraveLockerMessage -Icon 'Warning' -Message @"
+$browserName has closed, but the vault could not be sealed.
 
-Something still has a file open on the vault drive. Close it and open Brave
-again - it will seal the vault on the way in.
-'@
+Something still has a file open on the vault drive. Close it and open
+$browserName again - it will seal the vault on the way in.
+"@
     }
 }

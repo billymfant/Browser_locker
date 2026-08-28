@@ -70,6 +70,35 @@ $xaml = @'
           </Border>
         </StackPanel>
 
+        <!-- Browser -->
+        <StackPanel x:Name="PageBrowser" Visibility="Collapsed">
+          <TextBlock Foreground="#FFD8D8E0" FontSize="14" TextWrapping="Wrap" LineHeight="22" Text="Which browser should ask for a passcode? Only one browser can be locked per install."/>
+          <ItemsControl x:Name="BrowserList" Margin="0,16,0,0">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Background="#FF25252B" CornerRadius="4" Padding="12" Margin="0,0,0,8">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto"/>
+                      <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <RadioButton Grid.Column="0" GroupName="Browser" Margin="0,2,10,0"
+                                 IsEnabled="{Binding CanLock}" IsChecked="{Binding IsChosen, Mode=TwoWay}"
+                                 Tag="{Binding Id}"/>
+                    <StackPanel Grid.Column="1">
+                      <TextBlock Text="{Binding Name}" Foreground="{Binding NameColour}" FontWeight="SemiBold"/>
+                      <TextBlock Text="{Binding Detail}" Foreground="#FF9A9AA6" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                      <TextBlock Text="{Binding Warning}" Foreground="#FFE8C86A" TextWrapping="Wrap" Margin="0,5,0,0"
+                                 Visibility="{Binding WarningVisible}"/>
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock x:Name="LblBrowserInfo" Foreground="#FFFF8B8B" Margin="0,6,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
         <!-- Checks -->
         <StackPanel x:Name="PageChecks" Visibility="Collapsed">
           <TextBlock Foreground="#FF9A9AA6" FontSize="13" Margin="0,0,0,14" TextWrapping="Wrap" Text="Everything below must pass before setup can safely change anything."/>
@@ -193,7 +222,8 @@ $window = [Windows.Markup.XamlReader]::Load($reader)
 
 $ui = @{}
 foreach ($name in @(
-    'HeadTitle','HeadSub','PageWelcome','PageChecks','CheckList','BtnRecheck','PageLocation',
+    'HeadTitle','HeadSub','PageWelcome','PageBrowser','BrowserList','LblBrowserInfo',
+    'PageChecks','CheckList','BtnRecheck','PageLocation',
     'TxtVaultPath','BtnBrowse','LblVaultInfo','PagePass','TxtPass1','TxtPass2','LblPassInfo',
     'PageRecovery','TxtRecovery','BtnCopyKey','ChkStored','PageVerify','TxtVerify','LblVerifyInfo',
     'PageWork','LblWork','Bar','LblWorkSub','PageDone','LblDoneWarn','PageBlocked','LblBlocked',
@@ -203,6 +233,8 @@ foreach ($name in @(
 
 $state = @{
     Page        = 'Welcome'
+    Browser     = $null
+    BrowserRows = $null
     Requirement = $null
     VaultPath   = ''
     Passphrase  = $null
@@ -220,14 +252,15 @@ function Sync-Ui {
 function Show-Page {
     param([string]$Name)
 
-    foreach ($page in 'Welcome','Checks','Location','Pass','Recovery','Verify','Work','Done','Blocked') {
+    foreach ($page in 'Welcome','Browser','Checks','Location','Pass','Recovery','Verify','Work','Done','Blocked') {
         $ui["Page$page"].Visibility = 'Collapsed'
     }
     $ui["Page$Name"].Visibility = 'Visible'
     $state.Page = $Name
 
     $titles = @{
-        Welcome  = @('Brave Locker', 'A passcode for your browser')
+        Welcome  = @('Browser Locker', 'A passcode for your browser')
+        Browser  = @('Choose a browser', 'Which one should ask for a passcode')
         Checks   = @('System check', 'Making sure this PC can do it safely')
         Location = @('Where the vault goes', 'One encrypted file, on a drive of your choosing')
         Pass     = @('Choose your passcode', 'You will need this every time you open Brave')
@@ -240,10 +273,10 @@ function Show-Page {
     $ui.HeadTitle.Text = $titles[$Name][0]
     $ui.HeadSub.Text = $titles[$Name][1]
 
-    $steps = @{ Welcome='Step 1 of 6'; Checks='Step 2 of 6'; Location='Step 3 of 6'; Pass='Step 4 of 6'; Recovery='Step 5 of 6'; Verify='Step 6 of 6'; Work=''; Done=''; Blocked='' }
+    $steps = @{ Welcome='Step 1 of 7'; Browser='Step 2 of 7'; Checks='Step 3 of 7'; Location='Step 4 of 7'; Pass='Step 5 of 7'; Recovery='Step 6 of 7'; Verify='Step 7 of 7'; Work=''; Done=''; Blocked='' }
     $ui.LblStep.Text = $steps[$Name]
 
-    $ui.BtnBack.IsEnabled = ($Name -in @('Checks','Location','Pass'))
+    $ui.BtnBack.IsEnabled = ($Name -in @('Browser','Checks','Location','Pass'))
     $ui.BtnNext.Visibility = $(if ($Name -in @('Work','Blocked')) { 'Collapsed' } else { 'Visible' })
     $ui.BtnNext.Content = switch ($Name) {
         'Welcome'  { 'Start' }
@@ -259,8 +292,56 @@ function Read-PasswordBox {
     ConvertTo-BraveLockerSecureString -Text $Box.Password
 }
 
+function Update-Browsers {
+    $rows = New-Object System.Collections.ObjectModel.ObservableCollection[object]
+    $first = $true
+    foreach ($browser in Get-BraveLockerInstalledBrowser) {
+        $detail = if ($browser.CanLock) {
+            "{0:N2} GB, {1} profile(s)" -f ($browser.ProfileSize / 1GB), $browser.ProfileCount
+        } else {
+            [string]$browser.Reason
+        }
+
+        # The first lockable browser is preselected so the common case is one
+        # click, but nothing is chosen for the user if none can be locked.
+        $chosen = $false
+        if ($browser.CanLock -and $first) { $chosen = $true; $first = $false }
+
+        $rows.Add([pscustomobject]@{
+            Id             = $browser.Id
+            Name           = $browser.Name
+            NameColour     = $(if ($browser.CanLock) { '#FFF5F5F7' } else { '#FF6E6E7A' })
+            Detail         = $detail
+            CanLock        = $browser.CanLock
+            IsChosen       = $chosen
+            Warning        = [string]$browser.Note
+            WarningVisible = $(if ($browser.CanLock -and $browser.Note) { 'Visible' } else { 'Collapsed' })
+            Source         = $browser
+        })
+    }
+    $state.BrowserRows = $rows
+    $ui.BrowserList.ItemsSource = $rows
+
+    $lockable = @($rows | Where-Object { $_.CanLock })
+    if ($lockable.Count -eq 0) {
+        $ui.LblBrowserInfo.Text = 'No browser on this PC can be locked yet. Install one of the supported browsers and open it once so it creates a profile.'
+    } else {
+        $ui.LblBrowserInfo.Text = ''
+    }
+}
+
+function Get-ChosenBrowser {
+    if ($null -eq $state.BrowserRows) { return $null }
+    $row = $state.BrowserRows | Where-Object { $_.IsChosen -and $_.CanLock } | Select-Object -First 1
+    if ($null -eq $row) { return $null }
+    $row.Source
+}
+
 function Update-Checks {
-    $state.Requirement = Test-BraveLockerRequirement
+    $browser = $state.Browser
+    $state.Requirement = Test-BraveLockerRequirement `
+        -BraveExe $browser.ExePath -ProfilePath $browser.ProfileRoot `
+        -BraveProcessCount @(Get-Process -Name $browser.ProcessName -ErrorAction SilentlyContinue).Count
     $items = New-Object System.Collections.ObjectModel.ObservableCollection[object]
     foreach ($check in $state.Requirement.Checks) {
         $items.Add([pscustomobject]@{
@@ -277,8 +358,8 @@ function Update-Checks {
         $state.VaultPath = Get-BraveLockerDefaultVaultPath -DriveLetter $state.Requirement.VaultDrive
         $ui.TxtVaultPath.Text = $state.VaultPath
         $state.SizeMB = Get-BraveLockerVaultSizeMB -ProfileSizeBytes $state.Requirement.ProfileSize
-        $ui.LblVaultInfo.Text = "Your profile is {0:N2} GB. The vault can grow to {1} GB and only uses what it needs." -f `
-            ($state.Requirement.ProfileSize / 1GB), [int]($state.SizeMB / 1024)
+        $ui.LblVaultInfo.Text = "Your {0} profile is {1:N2} GB. The vault can grow to {2} GB and only uses what it needs." -f `
+            $state.Browser.Name, ($state.Requirement.ProfileSize / 1GB), [int]($state.SizeMB / 1024)
     }
 }
 
@@ -333,7 +414,8 @@ $ui.BtnCancel.Add_Click({ $window.Close() })
 
 $ui.BtnBack.Add_Click({
     switch ($state.Page) {
-        'Checks'   { Show-Page 'Welcome' }
+        'Browser'  { Show-Page 'Welcome' }
+        'Checks'   { Show-Page 'Browser' }
         'Location' { Show-Page 'Checks' }
         'Pass'     { Show-Page 'Location' }
     }
@@ -342,7 +424,18 @@ $ui.BtnBack.Add_Click({
 $ui.BtnNext.Add_Click({
     switch ($state.Page) {
 
-        'Welcome' { Show-Page 'Checks'; Update-Checks }
+        'Welcome' { Show-Page 'Browser'; Update-Browsers }
+
+        'Browser' {
+            $chosen = Get-ChosenBrowser
+            if ($null -eq $chosen) {
+                $ui.LblBrowserInfo.Text = 'Choose a browser to lock before continuing.'
+                return
+            }
+            $state.Browser = $chosen
+            Show-Page 'Checks'
+            Update-Checks
+        }
 
         'Checks' {
             if (-not $state.Requirement.CanProceed) { return }
@@ -428,18 +521,21 @@ $ui.BtnNext.Add_Click({
                 Save-BraveLockerConfig -VhdxPath $state.VhdxPath `
                     -ProfileMountPath $state.Requirement.ProfilePath `
                     -PreMigrationPath $state.PreMigration `
-                    -BraveExe $state.Requirement.BraveExe `
-                    -InstallRoot 'C:\Program Files\BraveLocker' | Out-Null
+                    -BraveExe $state.Browser.ExePath `
+                    -InstallRoot 'C:\Program Files\BraveLocker' `
+                    -BrowserId $state.Browser.Id `
+                    -BrowserName $state.Browser.Name `
+                    -BrowserExeName $state.Browser.ExeName | Out-Null
 
                 $vbs = 'C:\Program Files\BraveLocker\scripts\BraveLockerLauncher.vbs'
                 $backupDir = Join-Path (Get-BraveLockerPaths).StateRoot 'shortcut-backup'
-                foreach ($shortcut in @(Get-BraveLockerBraveShortcut -BraveExe $state.Requirement.BraveExe)) {
+                foreach ($shortcut in @(Get-BraveLockerBraveShortcut -BraveExe $state.Browser.ExePath -ExeName $state.Browser.ExeName)) {
                     Set-BraveLockerShortcutToLauncher -ShortcutPath $shortcut -VbsPath $vbs `
-                        -BraveExe $state.Requirement.BraveExe -BackupDir $backupDir
+                        -BraveExe $state.Browser.ExePath -BackupDir $backupDir
                 }
 
                 Set-Work 100 'Done.'
-                $ui.LblDoneWarn.Text = "Your original profile is still on this PC, unencrypted, at:`n`n$($state.PreMigration)`n`nOpen Brave and check your logins are all there. Once you are sure, run Complete-BraveLockerMigration.ps1 to delete it. Until then it is both a security hole and your rollback."
+                $ui.LblDoneWarn.Text = "Your original $($state.Browser.Name) profile is still on this PC, unencrypted, at:`n`n$($state.PreMigration)`n`nOpen Brave and check your logins are all there. Once you are sure, run Complete-BraveLockerMigration.ps1 to delete it. Until then it is both a security hole and your rollback."
                 Show-Page 'Done'
             } catch {
                 Show-Blocked 'Setup stopped' ("$($_.Exception.Message)`n`nYour Brave profile has not been deleted. If a folder named 'User Data.premigration' exists, that is your profile - rename it back to 'User Data' to undo everything.")
