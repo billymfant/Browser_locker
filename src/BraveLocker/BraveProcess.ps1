@@ -38,10 +38,16 @@ function Get-BraveLockerBrowserProcess {
     [CmdletBinding()]
     param(
         [string]$ProfilePath = '',
-        [switch]$AnyProfile
+        [switch]$AnyProfile,
+        # Which browser. Defaults to Brave for callers written before the tool
+        # could lock anything else.
+        [string]$ExeName = 'brave.exe'
     )
 
-    $processes = Get-CimInstance Win32_Process -Filter "Name='brave.exe'" -ErrorAction SilentlyContinue
+    # Quoted and escaped: an exe name reaches here from configuration, and a
+    # stray apostrophe would otherwise break the WQL filter.
+    $safeName = $ExeName.Replace("'", "''")
+    $processes = Get-CimInstance Win32_Process -Filter "Name='$safeName'" -ErrorAction SilentlyContinue
     if ($AnyProfile) { return $processes }
 
     if ([string]::IsNullOrWhiteSpace($ProfilePath)) {
@@ -91,12 +97,14 @@ function Wait-BraveLockerBrowserExit {
     param(
         [string]$ProfilePath = '',
         [switch]$AnyProfile,
+        [string]$ExeName = 'brave.exe',
         [int]$PollSeconds = 2
     )
 
-    # Brave forks helper processes and the process we launched can exit early,
-    # so poll for anything still using this profile rather than waiting on a handle.
-    while (@(Get-BraveLockerBrowserProcess -ProfilePath $ProfilePath -AnyProfile:$AnyProfile).Count -gt 0) {
+    # Chromium browsers fork helper processes and the one we launched can exit
+    # early, so poll for anything still using this profile rather than waiting
+    # on a handle.
+    while (@(Get-BraveLockerBrowserProcess -ProfilePath $ProfilePath -AnyProfile:$AnyProfile -ExeName $ExeName).Count -gt 0) {
         Start-Sleep -Seconds $PollSeconds
     }
 }
@@ -107,10 +115,11 @@ function Stop-BraveLockerBrowser {
     param(
         [string]$ProfilePath = '',
         [switch]$AnyProfile,
+        [string]$ExeName = 'brave.exe',
         [int]$TimeoutSeconds = 15
     )
 
-    $processes = @(Get-BraveLockerBrowserProcess -ProfilePath $ProfilePath -AnyProfile:$AnyProfile)
+    $processes = @(Get-BraveLockerBrowserProcess -ProfilePath $ProfilePath -AnyProfile:$AnyProfile -ExeName $ExeName)
     if ($processes.Count -eq 0) { return $true }
 
     foreach ($process in $processes) {
@@ -119,8 +128,8 @@ function Stop-BraveLockerBrowser {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if (@(Get-BraveLockerBrowserProcess -ProfilePath $ProfilePath -AnyProfile:$AnyProfile).Count -eq 0) { return $true }
+        if (@(Get-BraveLockerBrowserProcess -ProfilePath $ProfilePath -AnyProfile:$AnyProfile -ExeName $ExeName).Count -eq 0) { return $true }
         Start-Sleep -Milliseconds 500
     }
-    return (@(Get-BraveLockerBrowserProcess -ProfilePath $ProfilePath -AnyProfile:$AnyProfile).Count -eq 0)
+    return (@(Get-BraveLockerBrowserProcess -ProfilePath $ProfilePath -AnyProfile:$AnyProfile -ExeName $ExeName).Count -eq 0)
 }
