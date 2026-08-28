@@ -96,8 +96,8 @@ unlock through it — was tried and abandoned; see `docs/INTEGRATION-CHECKS.md`.
 
 All passphrase input goes through a GUI popup, never a console prompt. A console
 window and a dialog can sit on different keyboard layouts, so the same keystrokes
-produce different characters (`mirmigimebira` on a Greek layout is
-`μιρμιγιμεβιρα`), silently storing a passphrase that cannot later be typed.
+produce different characters (`correct-horse-battery` on a Greek layout is
+`σορρεχτ-ηορσε-βαττερυ`), silently storing a passphrase that cannot later be typed.
 
 Setup therefore seals the vault and reopens it with **freshly typed** input before
 migrating any data. Confirming a passphrase against a second copy of itself

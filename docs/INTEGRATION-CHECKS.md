@@ -62,7 +62,7 @@ technique had never actually been tested.
 
 The real cause: a console `Read-Host` and a GUI dialog can sit on different
 keyboard layouts, so the same keys produce different characters —
-`mirmigimebira` on a Greek layout is `μιρμιγιμεβιρα`. Setup stored one and the
+`correct-horse-battery` on a Greek layout is `σορρεχτ-ηορσε-βαττερυ`. Setup stored one and the
 user later typed the other.
 
 Two consequences, both now in the code:

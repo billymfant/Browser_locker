@@ -205,8 +205,8 @@ Clear-Variable recoveryKey
 # --- 5b. Prove the passphrase can be RETYPED -------------------------------
 # Verifying the vault opens with the SecureString already held in memory proves
 # nothing about whether the user can reproduce it. On a machine with more than
-# one keyboard layout the same keys produce different characters - "mirmigimebira"
-# typed on a Greek layout is "μιρμιγιμεβιρα" - so a passphrase can be stored,
+# one keyboard layout the same keys produce different characters - "correct-horse-battery"
+# typed on a Greek layout is "σορρεχτ-ηορσε-βαττερυ" - so a passphrase can be stored,
 # confirmed twice, and still be untypeable afterwards. That happened here, three
 # times, and each time setup reported success.
 #

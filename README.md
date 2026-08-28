@@ -78,8 +78,8 @@ Setup seals the vault and reopens it with a **freshly typed** passphrase before
 migrating anything, and refuses to continue if that fails.
 
 That check exists because of a real failure. On a machine with more than one
-keyboard layout the same keys produce different characters — `mirmigimebira`
-typed on a Greek layout is `μιρμιγιμεβιρα`. A passphrase can be entered,
+keyboard layout the same keys produce different characters — `correct-horse-battery`
+typed on a Greek layout is `σορρεχτ-ηορσε-βαττερυ`. A passphrase can be entered,
 confirmed twice against itself, stored, and be untypeable five minutes later.
 Confirming a passphrase against a second copy of itself cannot catch this,
 because both copies come from the same keystrokes.
