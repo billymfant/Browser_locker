@@ -1,6 +1,6 @@
-# Brave Locker
+# Browser Locker
 
-Puts a passcode on Brave. The profile — logins, cookies, saved passwords, saved
+Puts a passcode on your browser - Brave, Chrome, Edge, Vivaldi or Opera. The profile — logins, cookies, saved passwords, saved
 cards — lives inside a BitLocker-encrypted virtual disk that is only mounted
 while Brave is running. Everything is built into Windows 11 Pro; nothing
 third-party is installed.
