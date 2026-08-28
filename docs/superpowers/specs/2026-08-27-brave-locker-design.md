@@ -33,19 +33,76 @@ user's own employer if they control the OS image.
 ## Approach
 
 Store the Brave profile inside a BitLocker-encrypted virtual disk (VHDX) that is
-mounted only while Brave is running.
+mounted only while Brave is running — **mounted onto the folder Brave already
+uses**, so the profile path never changes.
 
 ```
-locked   : D:\apps\brave_locker\vault.vhdx   -> opaque encrypted file
-unlocked : V:\BraveProfile\                  -> brave.exe --user-data-dir=V:\BraveProfile
+locked   : D:\apps\brave_locker\vault.vhdx        -> opaque encrypted file
+unlocked : %LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data
+                                                   -> brave.exe   (no --user-data-dir)
 ```
 
-Brave runs as the normal `User` account, so the existing profile migrates in intact:
-cookies and saved passwords are encrypted with the Windows account key (DPAPI), and
-that account does not change. Nothing gets logged out and no cards are lost.
+### Why the profile must not move — App-Bound Encryption
+
+**This is the central constraint of the design, and it was learned by getting it
+wrong twice.**
+
+The original plan copied the profile to `V:\BraveProfile` and launched Brave with
+`--user-data-dir`. It reasoned that because cookies and passwords are DPAPI-
+encrypted under the Windows account, and the account does not change, nothing
+would be lost. That reasoning is obsolete.
+
+Brave (Chromium 127+) uses **App-Bound Encryption**. `Local State` holds an
+`app_bound_encrypted_key` — `APPB` prefix, wrapped by a SYSTEM-level service —
+and it only decrypts when the profile sits at its original path. Move the profile
+and Brave opens cleanly, signed out of everything, with the saved passwords
+unreadable.
+
+Established by controlled experiment:
+
+- The legacy `encrypted_key` (`DPAPI` prefix) still unwraps fine as the current
+  user, so the account key is intact and the vault does not break DPAPI.
+- A copy of the profile in a **plain, unencrypted folder** is logged out
+  identically to one in the vault. The vault is not the variable; the path is.
+- Brave does not re-key at the new path — the app-bound key is byte identical
+  after running there, so the data stays undecryptable rather than being rebuilt.
+
+App-Bound Encryption exists to defeat *"copy the profile folder elsewhere and
+read the cookies"*, which is how infostealer malware harvests sessions. Migrating
+a profile into a vault is that same operation as far as Brave is concerned.
+
+So the vault comes to the profile. Windows will only mount a volume over an empty
+directory, which is what makes this safe rather than fragile: a stray profile can
+never be silently shadowed.
+
+Brave runs as the normal `User` account and the path it sees is unchanged, so the
+existing profile migrates in intact.
 
 Everything used is built into Windows 11 Pro — BitLocker and VHDX. No third-party
 software to install.
+
+### Mount order
+
+BitLocker is unlocked through a drive letter and only then moved onto the folder:
+
+```
+attach -> assign drive letter -> UNLOCK -> add folder access path -> drop the letter
+```
+
+Verified on the machine. The reverse order — mount to the folder first, then
+unlock through it — was tried and abandoned; see `docs/INTEGRATION-CHECKS.md`.
+
+### Passphrase entry
+
+All passphrase input goes through a GUI popup, never a console prompt. A console
+window and a dialog can sit on different keyboard layouts, so the same keystrokes
+produce different characters (`mirmigimebira` on a Greek layout is
+`μιρμιγιμεβιρα`), silently storing a passphrase that cannot later be typed.
+
+Setup therefore seals the vault and reopens it with **freshly typed** input before
+migrating any data. Confirming a passphrase against a second copy of itself
+cannot catch a layout mismatch, because both copies come from the same keystrokes
+— which is how setup reported success three times for a vault nobody could open.
 
 ## Components
 
@@ -58,15 +115,23 @@ software to install.
 - Displays the BitLocker recovery key and requires the user to confirm they have
   stored it **off this machine** (phone, password manager). It is deliberately not
   written to disk: a recovery key sitting on the PC defeats the whole vault.
-- Copies the existing profile in and verifies the copy (file count plus size).
+- Seals the vault and reopens it with a **freshly typed** passphrase before any
+  data is migrated, and deletes the vault if that fails. A passphrase confirmed
+  only against itself can still be untypeable afterwards.
+- Copies the existing profile to the **vault root** and verifies the file count.
+- Renames the original to `User Data.premigration` and leaves the now-empty
+  folder as the vault's mount point.
+- Proves the vault really mounts at Brave's path before reporting success.
 - Registers the elevation helper task (below).
-- Leaves the original profile untouched until the user confirms the vault works.
+- Leaves the renamed original in place until the user confirms the vault works.
 
 **2. `Start-BraveLocked.ps1`** — the everyday launcher.
 - Prompts for the vault password.
+- Clears the mount folder, moving any stray profile aside rather than deleting it.
 - Mounts and unlocks the vault; on wrong password, retries without mounting anything.
-- Launches Brave against the in-vault profile.
-- Waits for every Brave process using that profile to exit, then locks and dismounts.
+- Launches Brave with **no `--user-data-dir`**, so it opens its normal profile
+  location — which is where the vault is mounted.
+- Waits for every Brave process to exit, then dismounts.
 
 **3. `BraveLocker-Mount` scheduled task** — the elevation helper.
 - Mounting a VHDX requires administrator rights, which would mean a UAC prompt on
@@ -81,11 +146,14 @@ software to install.
 - On a wrong passphrase the task detaches the vault before returning, so a failed
   attempt never leaves the profile attached.
 
-**4. Desktop shortcut** — "Brave (Private)", pointing at the launcher, using Brave's icon.
+**4. Shortcut takeover** — Brave's own shortcuts are repointed at the launcher,
+keeping their name and icon, so there is one Brave rather than a second "private"
+one. A separate "Brave (Private)" shortcut was the original plan and was dropped:
+users open the browser they already have.
 
 ## Daily flow
 
-1. Click **Brave (Private)**.
+1. Click **Brave**, as usual.
 2. Type the vault password.
 3. Brave opens with Facebook, email and cards exactly as they are now.
 4. Close Brave. The vault locks and dismounts on its own.
@@ -101,7 +169,11 @@ At rest, `vault.vhdx` is an unreadable encrypted blob.
   exposed. Dismount on reboot happens anyway; the check covers the crash case.
 - **Brave will not close:** the launcher waits, warns, and refuses to force-dismount a
   volume with open handles. Forcing it risks profile corruption.
-- **Drive letter `V:` already in use:** pick the highest free letter instead.
+- **Drive letter already in use:** the letter is only held while unlocking, then
+  dropped, so a clash is transient; the highest free letter is picked instead.
+- **Mount folder not empty:** Brave was started without the locker and built a
+  stray profile there. It is moved aside — never deleted, it may hold a real
+  session — and the mount proceeds.
 - **Vault file missing or corrupt:** report clearly and point at the recovery key. Do
   not attempt automatic repair.
 
