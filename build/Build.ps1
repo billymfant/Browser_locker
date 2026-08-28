@@ -22,7 +22,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $root 'dist'
 
 Write-Host ''
-Write-Host 'Brave Locker - build' -ForegroundColor Cyan
+Write-Host 'Browser Locker - build' -ForegroundColor Cyan
 Write-Host '===================='
 Write-Host ''
 
@@ -57,7 +57,7 @@ Write-Host '  all scripts parse.' -ForegroundColor Green
 Write-Host ''
 Write-Host 'Loading the wizard XAML...'
 Add-Type -AssemblyName PresentationFramework
-$wizardSource = Get-Content (Join-Path $root 'gui\BraveLockerWizard.ps1') -Raw
+$wizardSource = Get-Content (Join-Path $root 'gui\BrowserLockerWizard.ps1') -Raw
 $match = [regex]::Match($wizardSource, "(?s)\`$xaml = @'\r?\n(.*?)\r?\n'@")
 if (-not $match.Success) { throw 'Could not find the XAML block in the wizard.' }
 $reader = New-Object System.Xml.XmlNodeReader ([xml]$match.Groups[1].Value)
@@ -71,6 +71,9 @@ if (-not $IsccPath) {
     foreach ($candidate in @(
         (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe')
         (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+        # winget installs Inno Setup per-user by default, which is not on
+        # either Program Files path.
+        (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe')
     )) {
         if ($candidate -and (Test-Path $candidate)) { $IsccPath = $candidate; break }
     }
@@ -85,7 +88,7 @@ if (-not $IsccPath -or -not (Test-Path $IsccPath)) {
 }
 
 Write-Host "Compiling the installer with $IsccPath ..."
-& $IsccPath (Join-Path $PSScriptRoot 'BraveLocker.iss')
+& $IsccPath (Join-Path $PSScriptRoot 'BrowserLocker.iss')
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed (exit $LASTEXITCODE)." }
 
 Write-Host ''

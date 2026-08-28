@@ -1,4 +1,4 @@
-; Brave Locker installer.
+; Browser Locker installer.
 ;
 ; Installs to Program Files, which is deliberate and not just convention: the
 ; scheduled task runs a script from here with administrator rights, so a
@@ -7,10 +7,10 @@
 ;
 ; Build:  iscc build\BraveLocker.iss   (or build\Build.ps1)
 
-#define AppName        "Brave Locker"
+#define AppName        "Browser Locker"
 #define AppVersion     "1.0.0"
-#define AppPublisher   "Brave Locker"
-#define AppExeName     "BraveLocker.cmd"
+#define AppPublisher   "Browser Locker"
+#define AppExeName     "BrowserLocker.cmd"
 
 [Setup]
 AppId={{7E2F1C64-9A3D-4B8E-9C21-5D6A0F4B77E1}
@@ -18,11 +18,11 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={autopf}\BraveLocker
+DefaultDirName={autopf}\BrowserLocker
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist
-OutputBaseFilename=BraveLockerSetup-{#AppVersion}
+OutputBaseFilename=BrowserLockerSetup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -44,15 +44,15 @@ Source: "..\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesu
 Source: "..\gui\*";     DestDir: "{app}\gui";     Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}";         Flags: ignoreversion
 Source: "..\docs\*";    DestDir: "{app}\docs";    Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "BraveLocker.cmd"; DestDir: "{app}";      Flags: ignoreversion
+Source: "BrowserLocker.cmd"; DestDir: "{app}";    Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Brave Locker Setup";  Filename: "{app}\{#AppExeName}"
+Name: "{group}\Browser Locker Setup";  Filename: "{app}\{#AppExeName}"
 Name: "{group}\Read me";             Filename: "{app}\README.md"
-Name: "{group}\Uninstall Brave Locker"; Filename: "{uninstallexe}"
+Name: "{group}\Uninstall Browser Locker"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "Set up Brave Locker now"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "Set up Browser Locker now"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 ; Undo the machine changes - restore Brave's shortcuts, remove the scheduled
@@ -76,9 +76,9 @@ begin
 
   if (Pos('Core', Edition) = 1) then
   begin
-    MsgBox('Brave Locker needs Windows Pro, Enterprise or Education.'#13#10#13#10
+    MsgBox('Browser Locker needs Windows Pro, Enterprise or Education.'#13#10#13#10
          + 'This PC is running a Home edition, which does not include BitLocker, '
-         + 'and Brave Locker has no way to encrypt the vault without it.'#13#10#13#10
+         + 'and Browser Locker has no way to encrypt the vault without it.'#13#10#13#10
          + 'Nothing has been changed on your PC.',
       mbCriticalError, MB_OK);
     Result := False;

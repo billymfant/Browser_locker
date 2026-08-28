@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <#
-    Brave Locker setup wizard.
+    Browser Locker setup wizard.
 
     Self-elevates, then walks through: system checks, vault location,
     passphrase, recovery key, a typed-passphrase check, migration, done.
@@ -38,7 +38,7 @@ Import-Module (Join-Path $root 'src\BraveLocker\BraveLocker.psd1') -Force
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Brave Locker Setup" Height="560" Width="720"
+        Title="Browser Locker Setup" Height="560" Width="720"
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
         Background="#FF1B1B1F" FontFamily="Segoe UI">
   <Grid>
@@ -50,7 +50,7 @@ $xaml = @'
 
     <Border Grid.Row="0" Background="#FF25252B">
       <StackPanel Margin="28,16,28,0">
-        <TextBlock x:Name="HeadTitle" Text="Brave Locker" FontSize="22" FontWeight="SemiBold" Foreground="#FFF5F5F7"/>
+        <TextBlock x:Name="HeadTitle" Text="Browser Locker" FontSize="22" FontWeight="SemiBold" Foreground="#FFF5F5F7"/>
         <TextBlock x:Name="HeadSub" Text="A passcode for your browser" FontSize="13" Foreground="#FF9A9AA6" Margin="0,4,0,0" TextWrapping="Wrap"/>
       </StackPanel>
     </Border>
@@ -59,12 +59,12 @@ $xaml = @'
       <Grid>
         <!-- Welcome -->
         <StackPanel x:Name="PageWelcome" Visibility="Visible">
-          <TextBlock Foreground="#FFD8D8E0" FontSize="14" TextWrapping="Wrap" LineHeight="22" Text="Brave Locker puts a passcode on Brave. Your browser profile - logins, cookies, saved passwords - is kept inside an encrypted vault that only opens while Brave is running."/>
-          <TextBlock Foreground="#FFD8D8E0" FontSize="14" TextWrapping="Wrap" LineHeight="22" Margin="0,14,0,0" Text="When Brave is closed, that data is an unreadable encrypted file. Anyone who copies it, takes ownership of it, or reads the disk directly gets nothing - including someone with administrator rights."/>
+          <TextBlock Foreground="#FFD8D8E0" FontSize="14" TextWrapping="Wrap" LineHeight="22" Text="Browser Locker puts a passcode on your browser. Its profile - logins, cookies, saved passwords - is kept inside an encrypted vault that only opens while that browser is running."/>
+          <TextBlock Foreground="#FFD8D8E0" FontSize="14" TextWrapping="Wrap" LineHeight="22" Margin="0,14,0,0" Text="When the browser is closed, that data is an unreadable encrypted file. Anyone who copies it, takes ownership of it, or reads the disk directly gets nothing - including someone with administrator rights."/>
           <Border Background="#FF2E2A1C" BorderBrush="#FF6B5A1F" BorderThickness="1" CornerRadius="4" Padding="14" Margin="0,22,0,0">
             <StackPanel>
               <TextBlock Foreground="#FFE8C86A" FontWeight="SemiBold" Text="Before you start"/>
-              <TextBlock Foreground="#FFD8D8E0" TextWrapping="Wrap" Margin="0,6,0,0" LineHeight="20" Text="Close Brave completely. Setup copies your profile, and copying it while it is being written to risks a damaged copy."/>
+              <TextBlock Foreground="#FFD8D8E0" TextWrapping="Wrap" Margin="0,6,0,0" LineHeight="20" Text="Close the browser you want to lock. Setup copies its profile, and copying it while it is being written to risks a damaged copy."/>
               <TextBlock Foreground="#FFD8D8E0" TextWrapping="Wrap" Margin="0,6,0,0" LineHeight="20" Text="Your existing profile is copied, never deleted. It stays on disk as a rollback until you confirm everything works."/>
             </StackPanel>
           </Border>
@@ -488,7 +488,7 @@ $ui.BtnNext.Add_Click({
             if (-not $ui.ChkStored.IsChecked) {
                 [System.Windows.MessageBox]::Show(
                     "Save the recovery key first. It is shown once and never written to this PC.`n`nIf you lose both the passcode and this key, the profile is gone permanently.",
-                    'Brave Locker', 'OK', 'Warning') | Out-Null
+                    'Browser Locker', 'OK', 'Warning') | Out-Null
                 return
             }
             $ui.TxtVerify.Password = ''

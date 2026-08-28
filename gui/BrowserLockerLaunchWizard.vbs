@@ -11,6 +11,6 @@ guiDir = fso.GetParentFolderName(WScript.ScriptFullName)
 appDir = fso.GetParentFolderName(guiDir)
 
 command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & _
-          guiDir & "\BraveLockerWizard.ps1"""
+          guiDir & "\BrowserLockerWizard.ps1"""
 
 shell.Run command, 0, False
