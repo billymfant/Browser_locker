@@ -48,7 +48,19 @@ foreach ($sub in 'src', 'scripts') {
 }
 Set-BraveLockerScriptAcl -Path $InstallRoot
 Register-BraveLockerMountTask -ScriptPath (Join-Path $InstallRoot 'scripts\Invoke-BraveLockerVaultTask.ps1')
+# Browser updaters rewrite their own shortcuts and quietly undo the takeover
+# below. This puts it back at each logon; without it the lock comes off the
+# first time the browser updates itself and nobody is told.
+Register-BraveLockerShortcutGuardTask -ScriptPath (Join-Path $InstallRoot 'scripts\Invoke-BraveLockerShortcutGuard.ps1')
 Write-Host 'Installed copy refreshed and verified.'
+
+# The way out, installed at the same time as the lock rather than left in a
+# repo. Someone whose browser will not open has no browser to read a web page
+# with, and no reason to know this folder exists.
+$rescue = Install-BraveLockerRescueItems -InstallRoot $InstallRoot `
+    -CardSourcePath (Join-Path $repoRoot 'docs\EMERGENCY-CARD.md')
+Write-Host "Emergency card installed: $($rescue.CardPath)"
+foreach ($link in $rescue.Shortcuts) { Write-Host "  Start menu: $link" }
 
 # --- 2. Take over the real Brave shortcuts ---------------------------------
 Write-Host ''

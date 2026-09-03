@@ -119,3 +119,146 @@ Describe 'Initialize-BraveLockerMountFolder' {
         @(Get-ChildItem $script:folder -Force).Count | Should -Be 0
     }
 }
+
+Describe 'Test-BraveLockerStaleMountPoint' {
+    # A session that ends without a dismount leaves the mount point behind
+    # pointing at a volume that is gone. Nothing in the normal dismount path can
+    # clear it afterwards - Remove-PartitionAccessPath works through the
+    # partition, and there is no partition once the vault is detached - so the
+    # launcher has to recognise it rather than treat it as a live mount.
+    It 'is false for an ordinary folder' {
+        Mock -ModuleName BraveLocker Get-Item { [pscustomobject]@{ Attributes = [System.IO.FileAttributes]::Directory } }
+        Test-BraveLockerStaleMountPoint -Path 'C:\User Data' | Should -BeFalse
+    }
+
+    It 'is false for a folder that is not there at all' {
+        Mock -ModuleName BraveLocker Get-Item { }
+        Test-BraveLockerStaleMountPoint -Path 'C:\User Data' | Should -BeFalse
+    }
+
+    It 'is false for a LIVE mount point, which can still be read through' {
+        # The safety-critical case. Calling a live mount stale would have the
+        # launcher delete the mount point of an open vault.
+        Mock -ModuleName BraveLocker Get-Item {
+            [pscustomobject]@{ Attributes = [System.IO.FileAttributes]::Directory -bor [System.IO.FileAttributes]::ReparsePoint }
+        }
+        Mock -ModuleName BraveLocker Get-ChildItem { [pscustomobject]@{ Name = 'Local State' } }
+        Test-BraveLockerStaleMountPoint -Path 'C:\User Data' | Should -BeFalse
+    }
+
+    It 'is true for a mount point whose volume has gone' {
+        Mock -ModuleName BraveLocker Get-Item {
+            [pscustomobject]@{ Attributes = [System.IO.FileAttributes]::Directory -bor [System.IO.FileAttributes]::ReparsePoint }
+        }
+        Mock -ModuleName BraveLocker Get-ChildItem { throw 'Could not find a part of the path.' }
+        Test-BraveLockerStaleMountPoint -Path 'C:\User Data' | Should -BeTrue
+    }
+}
+
+Describe 'Test-BraveLockerMountFolderReady tells a stale mount point from a live one' {
+    BeforeEach {
+        Mock -ModuleName BraveLocker Test-Path { $true }
+        Mock -ModuleName BraveLocker Get-Item {
+            [pscustomobject]@{ Attributes = [System.IO.FileAttributes]::Directory -bor [System.IO.FileAttributes]::ReparsePoint }
+        }
+    }
+
+    It 'reports IsMountPoint while the vault is genuinely mounted' {
+        Mock -ModuleName BraveLocker Get-ChildItem { [pscustomobject]@{ Name = 'Local State' } }
+        (Test-BraveLockerMountFolderReady -Path 'C:\User Data').Reason | Should -Be 'IsMountPoint'
+    }
+
+    It 'reports StaleMountPoint when nothing can be read through it' {
+        Mock -ModuleName BraveLocker Get-ChildItem { throw 'Could not find a part of the path.' }
+        (Test-BraveLockerMountFolderReady -Path 'C:\User Data').Reason | Should -Be 'StaleMountPoint'
+    }
+}
+
+Describe 'Initialize-BraveLockerMountFolder and a stale mount point' {
+    It 'clears it and becomes ready, instead of dead-ending the launcher' {
+        # This is the bug that bricked a real install: a stale mount point came
+        # back as "something is already mounted, restart the PC" - advice that
+        # could never work, because no restart removes a mount point nothing
+        # owns any more. The launcher stopped there, before the passphrase
+        # prompt, every single time.
+        #
+        # The folder is judged twice: stale, then plain and empty once cleared.
+        $script:readyCalls = 0
+        Mock -ModuleName BraveLocker Test-BraveLockerMountFolderReady {
+            $script:readyCalls++
+            if ($script:readyCalls -eq 1) {
+                [pscustomobject]@{ IsReady = $false; Reason = 'StaleMountPoint'; ItemCount = 0 }
+            } else {
+                [pscustomobject]@{ IsReady = $true; Reason = 'Empty'; ItemCount = 0 }
+            }
+        }
+        Mock -ModuleName BraveLocker Clear-BraveLockerStaleMountPoint {
+            [pscustomobject]@{ Cleared = $true; Error = '' }
+        }
+
+        $r = Initialize-BraveLockerMountFolder -Path 'C:\User Data' -QuarantineRoot 'C:\state'
+
+        Should -Invoke -ModuleName BraveLocker Clear-BraveLockerStaleMountPoint -Times 1
+        $r.IsReady                | Should -BeTrue
+        $r.ClearedStaleMountPoint | Should -BeTrue
+        $r.Action                 | Should -Be 'AlreadyEmpty'
+    }
+
+    It 'still quarantines a stray profile the stale mount point was hiding' {
+        # Clearing the link can uncover a profile that was underneath it all
+        # along. The user has to be told where that went, so the stray profile
+        # keeps the Action and the clearing is reported alongside it.
+        $script:readyCalls = 0
+        Mock -ModuleName BraveLocker Test-BraveLockerMountFolderReady {
+            $script:readyCalls++
+            if ($script:readyCalls -eq 1) {
+                [pscustomobject]@{ IsReady = $false; Reason = 'StaleMountPoint'; ItemCount = 0 }
+            } else {
+                [pscustomobject]@{ IsReady = $false; Reason = 'NotEmpty'; ItemCount = 3 }
+            }
+        }
+        Mock -ModuleName BraveLocker Clear-BraveLockerStaleMountPoint {
+            [pscustomobject]@{ Cleared = $true; Error = '' }
+        }
+        Mock -ModuleName BraveLocker Move-BraveLockerStrayProfile {
+            [pscustomobject]@{ MovedCount = 3; Destination = 'C:\state\stray-profile-1' }
+        }
+
+        $r = Initialize-BraveLockerMountFolder -Path 'C:\User Data' -QuarantineRoot 'C:\state'
+
+        $r.IsReady                | Should -BeTrue
+        $r.Action                 | Should -Be 'QuarantinedStrayProfile'
+        $r.MovedCount             | Should -Be 3
+        $r.ClearedStaleMountPoint | Should -BeTrue
+    }
+
+    It 'reports StaleMountPointStuck rather than claiming to be ready when it cannot clear it' {
+        # mountvol needs administrator rights, so the unelevated launcher can
+        # fail here. It must say so - and say that a restart will not help -
+        # rather than carrying on into a mount that cannot succeed.
+        Mock -ModuleName BraveLocker Test-BraveLockerMountFolderReady {
+            [pscustomobject]@{ IsReady = $false; Reason = 'StaleMountPoint'; ItemCount = 0 }
+        }
+        Mock -ModuleName BraveLocker Clear-BraveLockerStaleMountPoint {
+            [pscustomobject]@{ Cleared = $false; Error = 'Access is denied.' }
+        }
+
+        $r = Initialize-BraveLockerMountFolder -Path 'C:\User Data' -QuarantineRoot 'C:\state'
+
+        $r.IsReady | Should -BeFalse
+        $r.Action  | Should -Be 'StaleMountPointStuck'
+        $r.Error   | Should -Match 'Access is denied'
+    }
+
+    It 'never clears a LIVE mount point' {
+        Mock -ModuleName BraveLocker Test-BraveLockerMountFolderReady {
+            [pscustomobject]@{ IsReady = $false; Reason = 'IsMountPoint'; ItemCount = 0 }
+        }
+        Mock -ModuleName BraveLocker Clear-BraveLockerStaleMountPoint { }
+
+        $r = Initialize-BraveLockerMountFolder -Path 'C:\User Data' -QuarantineRoot 'C:\state'
+
+        Should -Invoke -ModuleName BraveLocker Clear-BraveLockerStaleMountPoint -Times 0
+        $r.Action | Should -Be 'AlreadyMounted'
+    }
+}

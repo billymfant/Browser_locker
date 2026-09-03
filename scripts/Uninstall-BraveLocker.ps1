@@ -140,6 +140,15 @@ if ($takenOver.Count -eq 0) {
     }
 }
 
+# --- 1b. Remove the rescue shortcuts ---------------------------------------
+foreach ($name in 'Browser Locker - Emergency Card.lnk', 'Browser Locker - Repair.lnk') {
+    $link = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) $name
+    if (Test-Path $link) {
+        Remove-Item -Path $link -Force -ErrorAction SilentlyContinue
+        Write-Host "  removed: $link"
+    }
+}
+
 # --- 2. Remove any leftover private shortcuts ------------------------------
 foreach ($folder in ([Environment]::GetFolderPath('Desktop')), ([Environment]::GetFolderPath('Programs'))) {
     $stale = Join-Path $folder 'Brave (Private).lnk'
@@ -149,10 +158,12 @@ foreach ($folder in ([Environment]::GetFolderPath('Desktop')), ([Environment]::G
     }
 }
 
-# --- 3. Scheduled task ------------------------------------------------------
-if (Get-ScheduledTask -TaskName 'BraveLocker-Mount' -ErrorAction SilentlyContinue) {
-    Unregister-ScheduledTask -TaskName 'BraveLocker-Mount' -Confirm:$false
-    Write-Host '  removed the scheduled task'
+# --- 3. Scheduled tasks -----------------------------------------------------
+foreach ($taskName in 'BraveLocker-Mount', 'BraveLocker-ShortcutGuard') {
+    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+        Write-Host "  removed the scheduled task: $taskName"
+    }
 }
 
 # --- 4. Detach and delete the vault ----------------------------------------

@@ -1,4 +1,5 @@
 $script:BraveLockerTaskName = 'BraveLocker-Mount'
+$script:BraveLockerShortcutGuardTaskName = 'BraveLocker-ShortcutGuard'
 
 function New-BraveLockerVaultRequest {
     [CmdletBinding()]
@@ -115,6 +116,54 @@ function Register-BraveLockerMountTask {
 
     Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal `
         -Settings $settings -Description 'Attaches and detaches the Brave Locker vault.' -Force | Out-Null
+}
+
+function Register-BraveLockerShortcutGuardTask {
+    <#
+        Puts back the shortcut takeover after a browser update undoes it.
+
+        Brave's updater rewrites its own Start menu shortcut when it updates
+        itself: it resets TargetPath to brave.exe and leaves the Arguments
+        alone, so a shortcut the locker owns comes out pointing at the browser
+        with the launcher's .vbs as an argument. Clicking Brave then starts
+        Brave directly and the passphrase prompt never appears - the lock is
+        simply off, silently, until someone notices.
+
+        This cannot be repaired from inside the launcher, because in that state
+        the launcher is exactly what stops running. It needs a trigger from
+        outside, which is what this task is. It runs at logon, elevated, because
+        the shortcuts live under ProgramData.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$TaskName = $script:BraveLockerShortcutGuardTaskName,
+        [Parameter(Mandatory)][string]$ScriptPath
+    )
+
+    if (-not (Test-Path $ScriptPath)) {
+        throw "Brave Locker: cannot register the shortcut guard; '$ScriptPath' does not exist."
+    }
+
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+        -Argument ('-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $ScriptPath)
+
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User ('{0}\{1}' -f $env:USERDOMAIN, $env:USERNAME)
+
+    $principal = New-ScheduledTaskPrincipal -UserId ('{0}\{1}' -f $env:USERDOMAIN, $env:USERNAME) `
+        -LogonType Interactive -RunLevel Highest
+
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew
+
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal `
+        -Settings $settings -Description 'Restores the Brave Locker shortcut takeover after a browser update.' -Force | Out-Null
+}
+
+function Unregister-BraveLockerShortcutGuardTask {
+    [CmdletBinding()]
+    param([string]$TaskName = $script:BraveLockerShortcutGuardTaskName)
+
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 
 function Invoke-BraveLockerMountTask {
