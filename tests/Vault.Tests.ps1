@@ -92,3 +92,118 @@ Describe 'Get-BraveLockerPartitionDriveLetter' {
         Get-BraveLockerPartitionDriveLetter -Partition ([pscustomobject]@{ Type = 'Basic' }) | Should -Be ''
     }
 }
+
+Describe 'Get-BraveLockerVaultPartition when the vault is not attached' {
+    # A detached disk image reports Number as null, and Get-Disk refuses a null
+    # -Number by binding failure rather than by returning nothing. Under the
+    # elevated task's $ErrorActionPreference = 'Stop' that binding failure
+    # became "Cannot validate argument on parameter 'Number'" - which was
+    # written over the real unlock result and destroyed the evidence of why a
+    # launch had failed.
+    It 'returns nothing instead of throwing' {
+        Mock -ModuleName BraveLocker Get-DiskImage {
+            [pscustomobject]@{ ImagePath = 'D:\v.vhdx'; Attached = $false; Number = $null }
+        }
+        # Not just "does not throw": it must raise no error at all. The elevated
+        # task runs with $ErrorActionPreference = 'Stop', where the error this
+        # raised became a thrown one - and its message was then written over the
+        # real unlock result in response.json.
+        $before = $Error.Count
+        $result = Get-BraveLockerVaultPartition -VhdxPath 'D:\v.vhdx'
+        ($Error.Count - $before) | Should -Be 0 -Because 'a detached vault is an ordinary state, not an error'
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'never reaches Get-Disk with a null disk number' {
+        Mock -ModuleName BraveLocker Get-DiskImage {
+            [pscustomobject]@{ ImagePath = 'D:\v.vhdx'; Attached = $false; Number = $null }
+        }
+        Mock -ModuleName BraveLocker Get-Disk { }
+        $before = $Error.Count
+        Get-BraveLockerVaultPartition -VhdxPath 'D:\v.vhdx' | Out-Null
+        # Get-Disk validates -Number and rejects null at binding time, so even
+        # reaching it with a detached image costs an error record.
+        ($Error.Count - $before) | Should -Be 0
+        Should -Invoke -ModuleName BraveLocker Get-Disk -Times 0
+    }
+}
+
+Describe 'Test-BraveLockerWrongKeyError' {
+    # BitLocker reports a genuinely wrong passphrase as HRESULT 0x80310027.
+    # Everything else - a missing volume, an already-unlocked volume, a service
+    # that is not running - is a different problem and must not be reported to
+    # the user as "incorrect passphrase".
+    It 'recognises the wrong-key HRESULT' {
+        Test-BraveLockerWrongKeyError -Message 'The drive cannot be unlocked with the key provided. Confirm that you have provided the correct key and try again. (Exception from HRESULT: 0x80310027)' |
+            Should -BeTrue
+    }
+
+    It 'recognises the wrong-key wording without the HRESULT' {
+        Test-BraveLockerWrongKeyError -Message 'The drive cannot be unlocked with the key provided.' | Should -BeTrue
+    }
+
+    It 'does not treat a missing volume as a wrong passphrase' {
+        Test-BraveLockerWrongKeyError -Message 'The system cannot find the drive specified.' | Should -BeFalse
+    }
+
+    It 'does not treat an already-unlocked volume as a wrong passphrase' {
+        Test-BraveLockerWrongKeyError -Message 'The volume is not locked. (Exception from HRESULT: 0x80310001)' |
+            Should -BeFalse
+    }
+
+    It 'handles an empty message' {
+        Test-BraveLockerWrongKeyError -Message '' | Should -BeFalse
+    }
+}
+
+Describe 'Invoke-BraveLockerUnlockAttempt' {
+    It 'reports Unlocked when BitLocker accepts the passphrase' {
+        Mock -ModuleName BraveLocker Unlock-BitLocker { }
+        $r = Invoke-BraveLockerUnlockAttempt -MountPoint 'V' -Passphrase (ConvertTo-BraveLockerSecureString -Text 'passphrase')
+        $r.Unlocked | Should -BeTrue
+        $r.Reason   | Should -Be 'Unlocked'
+        $r.Error    | Should -Be ''
+    }
+
+    It 'reports WrongPassphrase only for the wrong-key HRESULT' {
+        Mock -ModuleName BraveLocker Unlock-BitLocker {
+            throw 'The drive cannot be unlocked with the key provided. (Exception from HRESULT: 0x80310027)'
+        }
+        $r = Invoke-BraveLockerUnlockAttempt -MountPoint 'V' -Passphrase (ConvertTo-BraveLockerSecureString -Text 'passphrase')
+        $r.Unlocked | Should -BeFalse
+        $r.Reason   | Should -Be 'WrongPassphrase'
+    }
+
+    It 'keeps the real error for any other failure, rather than blaming the passphrase' {
+        Mock -ModuleName BraveLocker Unlock-BitLocker { throw 'The system cannot find the drive specified.' }
+        $r = Invoke-BraveLockerUnlockAttempt -MountPoint 'V' -Passphrase (ConvertTo-BraveLockerSecureString -Text 'passphrase')
+        $r.Unlocked | Should -BeFalse
+        $r.Reason   | Should -Be 'UnlockFailed'
+        $r.Error    | Should -Match 'cannot find the drive'
+    }
+
+    It 'normalises a bare drive letter to a mount point' {
+        Mock -ModuleName BraveLocker Unlock-BitLocker { }
+        $r = Invoke-BraveLockerUnlockAttempt -MountPoint 'v' -Passphrase (ConvertTo-BraveLockerSecureString -Text 'passphrase')
+        $r.MountPoint | Should -Be 'V:'
+    }
+
+    It 'leaves a folder mount point alone apart from a trailing slash' {
+        Mock -ModuleName BraveLocker Unlock-BitLocker { }
+        $r = Invoke-BraveLockerUnlockAttempt -MountPoint 'C:\Users\U\AppData\Local\X\User Data\' `
+            -Passphrase (ConvertTo-BraveLockerSecureString -Text 'passphrase')
+        $r.MountPoint | Should -Be 'C:\Users\U\AppData\Local\X\User Data'
+    }
+}
+
+Describe 'Unlock-BraveLockerVault still answers yes or no' {
+    It 'returns $true when the unlock succeeds' {
+        Mock -ModuleName BraveLocker Unlock-BitLocker { }
+        Unlock-BraveLockerVault -MountPoint 'V' -Passphrase (ConvertTo-BraveLockerSecureString -Text 'p') | Should -BeTrue
+    }
+
+    It 'returns $false when the unlock fails' {
+        Mock -ModuleName BraveLocker Unlock-BitLocker { throw 'The drive cannot be unlocked with the key provided.' }
+        Unlock-BraveLockerVault -MountPoint 'V' -Passphrase (ConvertTo-BraveLockerSecureString -Text 'p') | Should -BeFalse
+    }
+}

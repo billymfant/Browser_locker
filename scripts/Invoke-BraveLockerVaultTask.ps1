@@ -88,10 +88,16 @@ try {
                 break
             }
 
-            if (-not (Unlock-BraveLockerVault -MountPoint $letter -Passphrase $secure)) {
-                # Wrong passphrase: detach again so nothing is left attached.
+            # Reports WrongPassphrase only when BitLocker actually rejected the
+            # key. Anything else - a volume that never appeared, one already
+            # unlocked - comes back as UnlockFailed with the real message, so
+            # the launcher does not accuse a correct passphrase.
+            $attempt = Invoke-BraveLockerUnlockAttempt -MountPoint $letter -Passphrase $secure
+            if (-not $attempt.Unlocked) {
+                # Detach again so a failed attempt never leaves the vault attached.
                 $response.Unlocked = $false
-                $response.Reason = 'WrongPassphrase'
+                $response.Reason = $attempt.Reason
+                $response.Error = $attempt.Error
                 Dismount-BraveLockerVault -VhdxPath $vhdxPath
                 $response.MountPath = ""
                 break

@@ -126,9 +126,45 @@ function Mount-BraveLockerVault {
     $mountPath
 }
 
-function Unlock-BraveLockerVault {
+function Test-BraveLockerWrongKeyError {
+    <#
+        Whether a BitLocker failure actually means the passphrase was wrong.
+
+        BitLocker reports a rejected key as FVE_E_FAILED_AUTHENTICATION,
+        HRESULT 0x80310027. Everything else - a volume that never appeared, a
+        volume that was already unlocked, a service that is not running - is a
+        different problem with a different fix.
+
+        Reporting those as "incorrect passphrase" sends someone hunting for a
+        typo in a passphrase that was right all along. That is not hypothetical:
+        it is how a working vault here came to look like a forgotten passphrase.
+    #>
     [CmdletBinding()]
     [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [AllowNull()]
+        [string]$Message
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Message)) { return $false }
+    if ($Message -match '0x80310027') { return $true }
+    [bool]($Message -match 'cannot be unlocked with the key provided')
+}
+
+function Invoke-BraveLockerUnlockAttempt {
+    <#
+        One unlock attempt, reported in full: whether it opened, and if not,
+        whether the passphrase was actually the problem.
+
+        Unlock-BraveLockerVault answers only yes or no, which is all a caller
+        that just needs a decision wants. This is for the caller that has to
+        tell a human WHY, and must not collapse every failure into "wrong
+        passphrase".
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         # Either a drive letter ("V", "V:") or a folder mount point.
         [Parameter(Mandatory)][Alias('DriveLetter')][string]$MountPoint,
@@ -144,12 +180,31 @@ function Unlock-BraveLockerVault {
 
     try {
         Unlock-BitLocker -MountPoint $target -Password $Passphrase -ErrorAction Stop | Out-Null
-        return $true
+        return [pscustomobject]@{
+            Unlocked = $true; MountPoint = $target; Reason = 'Unlocked'; Error = ''
+        }
     } catch {
-        # A wrong passphrase is an expected outcome, not an exceptional one.
-        Write-Verbose "Unlock failed: $($_.Exception.Message)"
-        return $false
+        # A wrong passphrase is an expected outcome, not an exceptional one -
+        # but only when it really was the passphrase.
+        $message = [string]$_.Exception.Message
+        $reason = if (Test-BraveLockerWrongKeyError -Message $message) { 'WrongPassphrase' } else { 'UnlockFailed' }
+        Write-Verbose "Unlock of '$target' failed ($reason): $message"
+        return [pscustomobject]@{
+            Unlocked = $false; MountPoint = $target; Reason = $reason; Error = $message
+        }
     }
+}
+
+function Unlock-BraveLockerVault {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        # Either a drive letter ("V", "V:") or a folder mount point.
+        [Parameter(Mandatory)][Alias('DriveLetter')][string]$MountPoint,
+        [Parameter(Mandatory)][securestring]$Passphrase
+    )
+
+    (Invoke-BraveLockerUnlockAttempt -MountPoint $MountPoint -Passphrase $Passphrase).Unlocked
 }
 
 function Dismount-BraveLockerVault {
@@ -162,14 +217,31 @@ function Dismount-BraveLockerVault {
 
 function Get-BraveLockerVaultPartition {
     <#
-        The vault's data partition. Reserved partitions are skipped: a GPT disk
-        carries a Microsoft Reserved partition that holds no filesystem.
+        The vault's data partition, or nothing when the vault is not attached.
+
+        Reserved partitions are skipped: a GPT disk carries a Microsoft Reserved
+        partition that holds no filesystem.
+
+        A DETACHED image reports Number as $null, and Get-Disk rejects a null
+        -Number at parameter-binding time rather than quietly returning nothing.
+        Under the elevated task's $ErrorActionPreference = 'Stop' that binding
+        failure was thrown, and "Cannot validate argument on parameter 'Number'"
+        was then written over the real unlock result in response.json - so the
+        one file that recorded WHY a launch failed instead recorded this. The
+        attached check happens here, before Get-Disk is ever reached.
+
+        Being detached is an ordinary state, not an error: every dismount path
+        asks for the partition of a vault that may already be gone.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$VhdxPath)
 
-    Get-DiskImage -ImagePath $VhdxPath |
-        Get-Disk |
+    $image = Get-DiskImage -ImagePath $VhdxPath -ErrorAction SilentlyContinue
+    if ($null -eq $image) { return }
+    if (-not $image.Attached) { return }
+    if ($null -eq $image.Number) { return }
+
+    Get-Disk -Number $image.Number -ErrorAction SilentlyContinue |
         Get-Partition -ErrorAction SilentlyContinue |
         Where-Object { $_.Type -ne 'Reserved' } |
         Select-Object -First 1
